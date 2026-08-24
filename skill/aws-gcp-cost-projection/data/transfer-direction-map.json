@@ -1,0 +1,9 @@
+{
+  "rules": [
+    {"pattern": "DataTransfer-In-Bytes", "direction": "inbound", "gcp_component": "egress_inbound_free", "strategy": "ignore", "note": "Inbound is free on GCP"},
+    {"pattern": "DataTransfer-Regional-Bytes", "direction": "intra_az", "gcp_component": "egress_intra_az_free", "strategy": "ignore", "note": "Intra-AZ free on GCP"},
+    {"pattern": "DataTransfer-Out-Bytes", "direction": "internet", "gcp_component": "egress_internet", "strategy": "map"},
+    {"pattern": "DataTransfer-CrossRegion", "direction": "inter_region", "gcp_component": "egress_inter_region", "strategy": "map"},
+    {"pattern": "Inter-AZ", "direction": "inter_zone", "gcp_component": "egress_inter_zone", "strategy": "map"}
+  ]
+}

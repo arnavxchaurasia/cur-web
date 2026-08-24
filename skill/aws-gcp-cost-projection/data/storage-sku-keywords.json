@@ -1,0 +1,81 @@
+{
+  "_meta": {
+    "description": "SKU description keywords and resource_group constants for storage mapping. Update here when GCP adds or renames storage SKUs — no prompt or Python changes needed.",
+    "maintained_by": "LLM agent — update when a GCP storage SKU description changes or a new volume type is added"
+  },
+
+  "ebs_volume_type_keywords": {
+    "_comment": "Description substring used in ILIKE filter when sweeping gcp_sku_rates for each EBS volume type.",
+    "gp2":              { "description_keyword": "Balanced PD Capacity",       "resource_group": "Storage",  "companion_iops": false, "companion_throughput": false },
+    "gp3_capacity":     { "description_keyword": "Hyperdisk Balanced Capacity", "resource_group": "Storage",  "companion_iops": true,  "companion_throughput": true  },
+    "gp3_iops":         { "description_keyword": "Hyperdisk Balanced IOPS",     "resource_group": "Storage",  "companion_iops": false, "companion_throughput": false },
+    "gp3_throughput":   { "description_keyword": "Hyperdisk Balanced Throughput","resource_group": "Storage",  "companion_iops": false, "companion_throughput": false },
+    "io1":              { "description_keyword": "Hyperdisk Balanced Capacity",  "resource_group": "Storage",  "companion_iops": false, "companion_throughput": false },
+    "io2":              { "description_keyword": "Hyperdisk Balanced Capacity",  "resource_group": "Storage",  "companion_iops": false, "companion_throughput": false },
+    "io2_block_express":{ "description_keyword": "Extreme PD Capacity",         "resource_group": "SSD",      "companion_iops": false, "companion_throughput": false },
+    "st1":              { "description_keyword": "Storage PD Capacity",          "resource_group": "Storage",  "companion_iops": false, "companion_throughput": false },
+    "sc1":              { "description_keyword": "Storage PD Capacity",          "resource_group": "Storage",  "companion_iops": false, "companion_throughput": false },
+    "magnetic":         { "description_keyword": "Storage PD Capacity",          "resource_group": "Storage",  "companion_iops": false, "companion_throughput": false },
+    "aurora_storage":   { "description_keyword": "Standard storage",             "resource_group": "Storage",  "companion_iops": false, "companion_throughput": false },
+    "aurora_storage_alt":{ "description_keyword": "Low cost storage",            "resource_group": "Storage",  "companion_iops": false, "companion_throughput": false },
+    "efs_standard":     { "description_keyword": "Filestore Capacity Basic SSD", "resource_group": "Storage",  "companion_iops": false, "companion_throughput": false },
+    "efs_ia":           { "description_keyword": "Filestore Capacity Basic HDD", "resource_group": "Storage",  "companion_iops": false, "companion_throughput": false }
+  },
+
+  "block_storage_resource_groups": {
+    "_comment": "Stable GCP catalog resource_group values for the block storage sweep query.",
+    "general_storage": ["Storage", "SSD", "LocalSSD"],
+    "hyperdisk":       ["Storage"]
+  },
+
+  "s3_to_gcs_class": {
+    "_comment": "Maps S3 storage class name (from operation field) to GCS class and the description keyword used to filter gcp_sku_rates.",
+    "StandardStorage":                  { "gcs_class": "Standard",  "description_keyword": "Standard",  "resource_group": "StorageUsage" },
+    "IntelligentTiering-FA":            { "gcs_class": "Standard",  "description_keyword": "Standard",  "resource_group": "StorageUsage" },
+    "IntelligentTiering-IA":            { "gcs_class": "Nearline",  "description_keyword": "Nearline",  "resource_group": "StorageUsage" },
+    "StandardIAStorage":                { "gcs_class": "Nearline",  "description_keyword": "Nearline",  "resource_group": "StorageUsage" },
+    "OneZoneIAStorage":                 { "gcs_class": "Nearline",  "description_keyword": "Nearline",  "resource_group": "StorageUsage" },
+    "GlacierInstantRetrievalStorage":   { "gcs_class": "Coldline",  "description_keyword": "Coldline",  "resource_group": "StorageUsage" },
+    "GlacierStorage":                   { "gcs_class": "Coldline",  "description_keyword": "Coldline",  "resource_group": "StorageUsage" },
+    "DeepArchiveStorage":               { "gcs_class": "Archive",   "description_keyword": "Archive",   "resource_group": "StorageUsage" },
+    "IntelligentTiering-Monitoring":    { "gcs_class": "passthrough", "description_keyword": null, "note": "No GCS autoclass monitoring fee" }
+  },
+
+  "gcs_request_resource_groups": {
+    "Class A (PUT/POST/LIST/COPY)": "ClassAOperations",
+    "Class B (GET/HEAD)":           "ClassBOperations"
+  },
+
+  "gcs_region_type_keyword": {
+    "_comment": "Append to description filter when target is a multi-region vs single-region GCS location.",
+    "multi_region":  "Multi-Region",
+    "single_region": null
+  },
+
+  "db_resource_groups": {
+    "_comment": "Stable GCP catalog resource_group values for DB compute rows.",
+    "cloud_sql_cpu": "SQLGen2InstancesCPU",
+    "cloud_sql_ram": "SQLGen2InstancesRAM",
+    "cloud_sql_storage": "SQLGen2InstancesPD-SSD",
+    "alloydb_cpu": "AlloyDB CPU",
+    "alloydb_ram": "AlloyDB RAM",
+    "memorystore_redis": "RedisMemorystore",
+    "memorystore_memcached": "MemcachedMemorystore"
+  },
+
+  "db_ha_tier_keywords": {
+    "_comment": "Description keywords used to filter by HA tier. Load these instead of hardcoding in prompts.",
+    "cloud_sql_ha":      "Regional",
+    "cloud_sql_zonal":   "Zonal",
+    "cloud_sql_arm":     "Enterprise Plus",
+    "memorystore_ha":    "Standard",
+    "memorystore_zonal": "Basic"
+  },
+
+  "transfer_resource_groups": {
+    "_comment": "Stable GCP catalog resource_group values for data transfer rows.",
+    "internet_egress":    "InternetEgress",
+    "interzone_egress":   "InterzoneEgress",
+    "interregion_egress": "InterregionEgress"
+  }
+}

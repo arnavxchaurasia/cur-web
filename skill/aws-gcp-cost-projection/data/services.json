@@ -1,0 +1,662 @@
+[
+  {
+    "name": "services/01BA-36F6-AA33",
+    "serviceId": "01BA-36F6-AA33",
+    "displayName": "Web Risk",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/02DA-B362-D983",
+    "serviceId": "02DA-B362-D983",
+    "displayName": "Cloud Text-to-Speech API",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/04C4-B046-D8B2",
+    "serviceId": "04C4-B046-D8B2",
+    "displayName": "Cloud Natural Language",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/0D19-EC86-35B0",
+    "serviceId": "0D19-EC86-35B0",
+    "displayName": "Cloud Data Fusion",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/116A-ED39-D1F0",
+    "serviceId": "116A-ED39-D1F0",
+    "displayName": "Database Migration",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/149C-F9EC-3994",
+    "serviceId": "149C-F9EC-3994",
+    "displayName": "Artifact Registry",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/152E-C115-5142",
+    "serviceId": "152E-C115-5142",
+    "displayName": "Cloud Run",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/16B8-3DDA-9F10",
+    "serviceId": "16B8-3DDA-9F10",
+    "displayName": "BigQuery Reservation API",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/1992-3666-B975",
+    "serviceId": "1992-3666-B975",
+    "displayName": "Cloud Composer",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/1A7E-0F2E-A252",
+    "serviceId": "1A7E-0F2E-A252",
+    "displayName": "Cloud Optimization",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/1B17-0E4A-E355",
+    "serviceId": "1B17-0E4A-E355",
+    "displayName": "reCAPTCHA Enterprise",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/1C2D-8C78-EC58",
+    "serviceId": "1C2D-8C78-EC58",
+    "displayName": "Apigee",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/1C58-CF90-9614",
+    "serviceId": "1C58-CF90-9614",
+    "displayName": "Firebase Realtime Database",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/1DB1-3CD3-35A3",
+    "serviceId": "1DB1-3CD3-35A3",
+    "displayName": "Translate",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/1F14-4801-0E16",
+    "serviceId": "1F14-4801-0E16",
+    "displayName": "Cloud Scheduler",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/24E6-581D-38E5",
+    "serviceId": "24E6-581D-38E5",
+    "displayName": "BigQuery",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/25DB-618E-3F79",
+    "serviceId": "25DB-618E-3F79",
+    "displayName": "Cloud IDS",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/2662-232A-AC11",
+    "serviceId": "2662-232A-AC11",
+    "displayName": "Firebase Hosting",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/29E7-DA93-CA13",
+    "serviceId": "29E7-DA93-CA13",
+    "displayName": "Cloud Run Functions",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/31B7-A308-38F7",
+    "serviceId": "31B7-A308-38F7",
+    "displayName": "Anthos Policy Controller",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/363B-8851-170D",
+    "serviceId": "363B-8851-170D",
+    "displayName": "Dataproc",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/36A9-155B-23F0",
+    "serviceId": "36A9-155B-23F0",
+    "displayName": "API Gateway",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/3A1B-66C4-2BAE",
+    "serviceId": "3A1B-66C4-2BAE",
+    "displayName": "Pub/Sub Lite",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/3BE5-FBA4-1B83",
+    "serviceId": "3BE5-FBA4-1B83",
+    "displayName": "Application Integration",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/3C58-66D1-EF70",
+    "serviceId": "3C58-66D1-EF70",
+    "displayName": "Firebase Data Connect",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/3DAD-299B-0D94",
+    "serviceId": "3DAD-299B-0D94",
+    "displayName": "Backup and DR Service",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/3DAD-B96D-BE09",
+    "serviceId": "3DAD-B96D-BE09",
+    "displayName": "Anthos Service Mesh",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/3E65-A14D-E29F",
+    "serviceId": "3E65-A14D-E29F",
+    "displayName": "Firebase Auth",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/4252-F221-8339",
+    "serviceId": "4252-F221-8339",
+    "displayName": "Document Warehouse",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/4528-FDD0-A2A0",
+    "serviceId": "4528-FDD0-A2A0",
+    "displayName": "Cloud Workstations",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/48DA-485B-58AE",
+    "serviceId": "48DA-485B-58AE",
+    "displayName": "Cloud Media Translation API",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/5199-4CC9-178F",
+    "serviceId": "5199-4CC9-178F",
+    "displayName": "Transfer Appliance Rehydrator",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/5490-F7B7-8DF6",
+    "serviceId": "5490-F7B7-8DF6",
+    "displayName": "Cloud Logging",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/57D6-8E6B-2DE0",
+    "serviceId": "57D6-8E6B-2DE0",
+    "displayName": "Cloud Dataflow",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/58CD-E7C3-72CA",
+    "serviceId": "58CD-E7C3-72CA",
+    "displayName": "Cloud Monitoring",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/5AF5-2C11-D467",
+    "serviceId": "5AF5-2C11-D467",
+    "displayName": "Cloud Memorystore for Redis",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/5BA9-8DD4-D85C",
+    "serviceId": "5BA9-8DD4-D85C",
+    "displayName": "Dataproc Metastore",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/5DD3-CA5C-D8EA",
+    "serviceId": "5DD3-CA5C-D8EA",
+    "displayName": "Firebase",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/63DE-82AB-F564",
+    "serviceId": "63DE-82AB-F564",
+    "displayName": "Cloud Speech API",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/650B-3C82-34DB",
+    "serviceId": "650B-3C82-34DB",
+    "displayName": "BigQuery BI Engine",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/6594-98DC-0EB3",
+    "serviceId": "6594-98DC-0EB3",
+    "displayName": "Cloud KMS KACLS",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/65DF-8A98-0834",
+    "serviceId": "65DF-8A98-0834",
+    "displayName": "Confidential Computing",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/6910-147C-4426",
+    "serviceId": "6910-147C-4426",
+    "displayName": "Healthcare ML",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/6CD9-8229-22B6",
+    "serviceId": "6CD9-8229-22B6",
+    "displayName": "Cloud IoT Core",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/6F81-5844-456A",
+    "serviceId": "6F81-5844-456A",
+    "displayName": "Compute Engine",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/7088-FDF6-8532",
+    "serviceId": "7088-FDF6-8532",
+    "displayName": "Cloud Data Labeling Service",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/73DA-E903-54C9",
+    "serviceId": "73DA-E903-54C9",
+    "displayName": "Cloud Vision OCR On-Prem",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/74B1-77CF-C302",
+    "serviceId": "74B1-77CF-C302",
+    "displayName": "Vertex AI Search",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/7766-403C-6D6E",
+    "serviceId": "7766-403C-6D6E",
+    "displayName": "Certificate Manager",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/7929-AEC3-626F",
+    "serviceId": "7929-AEC3-626F",
+    "displayName": "Backup for GKE",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/7BEB-7A51-4223",
+    "serviceId": "7BEB-7A51-4223",
+    "displayName": "Network Connectivity Center",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/7C43-DC47-72C5",
+    "serviceId": "7C43-DC47-72C5",
+    "displayName": "Transfer Appliance",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/7C52-19D8-71EE",
+    "serviceId": "7C52-19D8-71EE",
+    "displayName": "Cloud Healthcare",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/7EC6-CE53-9E39",
+    "serviceId": "7EC6-CE53-9E39",
+    "displayName": "Datastream",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/807A-DB32-72DB",
+    "serviceId": "807A-DB32-72DB",
+    "displayName": "Cloud Contact Center AI Platform",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/825D-BF56-C188",
+    "serviceId": "825D-BF56-C188",
+    "displayName": "Firebase App Hosting",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/82AF-DE7A-51D0",
+    "serviceId": "82AF-DE7A-51D0",
+    "displayName": "Container Registry Vulnerability Scanning",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/8356-8DF5-0170",
+    "serviceId": "8356-8DF5-0170",
+    "displayName": "Earth Engine",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/8534-F08B-BEBD",
+    "serviceId": "8534-F08B-BEBD",
+    "displayName": "Cloud Domains",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/8735-FD22-0718",
+    "serviceId": "8735-FD22-0718",
+    "displayName": "Firebase Test Lab",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/879F-1832-8749",
+    "serviceId": "879F-1832-8749",
+    "displayName": "Stackdriver",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/89B9-6A5A-B358",
+    "serviceId": "89B9-6A5A-B358",
+    "displayName": "Data Catalog",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/8B5D-EF7D-EB12",
+    "serviceId": "8B5D-EF7D-EB12",
+    "displayName": "Cloud Build",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/8CD0-2A17-0B05",
+    "serviceId": "8CD0-2A17-0B05",
+    "displayName": "Cloud Video Intelligence API",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/9186-F79E-3871",
+    "serviceId": "9186-F79E-3871",
+    "displayName": "GKE Enterprise / GDC",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/9501-987F-84F0",
+    "serviceId": "9501-987F-84F0",
+    "displayName": "BigQuery Data Transfer Service",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/95FF-2EF5-5EA1",
+    "serviceId": "95FF-2EF5-5EA1",
+    "displayName": "Cloud Storage",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/9662-B51E-5089",
+    "serviceId": "9662-B51E-5089",
+    "displayName": "Cloud SQL",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/9B82-7513-9D1C",
+    "serviceId": "9B82-7513-9D1C",
+    "displayName": "Cloud Trace",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/9C2E-5AAC-D058",
+    "serviceId": "9C2E-5AAC-D058",
+    "displayName": "Cloud Memorystore for Memcached",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/9C87-5BCE-65DD",
+    "serviceId": "9C87-5BCE-65DD",
+    "displayName": "Storage Insights",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/A18B-E573-B019",
+    "serviceId": "A18B-E573-B019",
+    "displayName": "Cloud Document API",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/A1E8-BE35-7EBC",
+    "serviceId": "A1E8-BE35-7EBC",
+    "displayName": "Cloud Pub/Sub",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/A2B5-E0F1-B0F3",
+    "serviceId": "A2B5-E0F1-B0F3",
+    "displayName": "Cloud Memorystore",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/AEFD-7695-64FA",
+    "serviceId": "AEFD-7695-64FA",
+    "displayName": "Gemini API",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/AF9A-5F4C-31E5",
+    "serviceId": "AF9A-5F4C-31E5",
+    "displayName": "Recommendations AI",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/B82B-D19C-4B37",
+    "serviceId": "B82B-D19C-4B37",
+    "displayName": "Cloud Edition for Lustre",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/BA71-906B-95A8",
+    "serviceId": "BA71-906B-95A8",
+    "displayName": "Eventarc",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/BAE4-9668-BD24",
+    "serviceId": "BAE4-9668-BD24",
+    "displayName": "Certificate Authority Service",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/C08E-37B9-80D3",
+    "serviceId": "C08E-37B9-80D3",
+    "displayName": "Cloud Vision API",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/C3AD-803F-FC89",
+    "serviceId": "C3AD-803F-FC89",
+    "displayName": "Cloud Deploy",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/C3BE-24A5-0975",
+    "serviceId": "C3BE-24A5-0975",
+    "displayName": "Cloud Bigtable",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/C49F-B7F2-7416",
+    "serviceId": "C49F-B7F2-7416",
+    "displayName": "AlloyDB",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/C71C-0952-AAC7",
+    "serviceId": "C71C-0952-AAC7",
+    "displayName": "Looker",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/C7E2-9256-1C43",
+    "serviceId": "C7E2-9256-1C43",
+    "displayName": "Vertex AI",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/CAE2-A537-4A95",
+    "serviceId": "CAE2-A537-4A95",
+    "displayName": "Source Repository",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/CC63-0873-48FD",
+    "serviceId": "CC63-0873-48FD",
+    "displayName": "Cloud Spanner",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/CCD8-9BF1-090E",
+    "serviceId": "CCD8-9BF1-090E",
+    "displayName": "Kubernetes Engine",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/D64E-AF12-1813",
+    "serviceId": "D64E-AF12-1813",
+    "displayName": "Cloud Data Loss Prevention",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/D870-408D-92A6",
+    "serviceId": "D870-408D-92A6",
+    "displayName": "Cloud Document AI API",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/D97E-AB26-5D95",
+    "serviceId": "D97E-AB26-5D95",
+    "displayName": "Cloud Filestore",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/DC5D-D207-FD2F",
+    "serviceId": "DC5D-D207-FD2F",
+    "displayName": "Identity Platform",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/DCC9-8DB9-673F",
+    "serviceId": "DCC9-8DB9-673F",
+    "displayName": "BigQuery Storage API",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/DD2A-3C5C-44AF",
+    "serviceId": "DD2A-3C5C-44AF",
+    "displayName": "Looker Data Platform SaaS",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/E000-3F24-B8AA",
+    "serviceId": "E000-3F24-B8AA",
+    "displayName": "Cloud TPU",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/E19D-14A9-5725",
+    "serviceId": "E19D-14A9-5725",
+    "displayName": "Cloud Machine Learning Engine",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/E505-1604-58F8",
+    "serviceId": "E505-1604-58F8",
+    "displayName": "Networking",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/E5FE-878F-FECE",
+    "serviceId": "E5FE-878F-FECE",
+    "displayName": "Vertex AI Vision",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/E722-8436-A7EB",
+    "serviceId": "E722-8436-A7EB",
+    "displayName": "Workflows",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/E749-01A2-AE1F",
+    "serviceId": "E749-01A2-AE1F",
+    "displayName": "Network Security",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/E832-15F4-C722",
+    "serviceId": "E832-15F4-C722",
+    "displayName": "Binary Authorization",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/EDA4-10BF-88A3",
+    "serviceId": "EDA4-10BF-88A3",
+    "displayName": "Cloud AutoML",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/EE2C-7FAC-5E08",
+    "serviceId": "EE2C-7FAC-5E08",
+    "displayName": "Cloud Firestore",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/EE2F-D110-890C",
+    "serviceId": "EE2F-D110-890C",
+    "displayName": "Cloud Key Management Service (KMS)",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/F043-376E-24E5",
+    "serviceId": "F043-376E-24E5",
+    "displayName": "Firebase Phone Number Verification",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/F17B-412E-CB64",
+    "serviceId": "F17B-412E-CB64",
+    "displayName": "App Engine",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/F3A6-D7B7-9BDA",
+    "serviceId": "F3A6-D7B7-9BDA",
+    "displayName": "Cloud Tasks",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/FA26-5236-B8B5",
+    "serviceId": "FA26-5236-B8B5",
+    "displayName": "Cloud DNS",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/FBC0-AA4A-C89A",
+    "serviceId": "FBC0-AA4A-C89A",
+    "displayName": "Cloud Dialogflow API",
+    "businessEntityName": "businessEntities/GCP"
+  },
+  {
+    "name": "services/FBF2-FC68-171A",
+    "serviceId": "FBF2-FC68-171A",
+    "displayName": "Security Command Center",
+    "businessEntityName": "businessEntities/GCP"
+  }
+]

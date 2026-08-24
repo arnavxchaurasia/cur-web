@@ -1,0 +1,36 @@
+{
+  "_meta": {
+    "description": "Service-specific confidence ceilings. Add new services here when a new high-ambiguity mapping is identified.",
+    "maintained_by": "LLM agent — add a new entry when a service has inherent topology ambiguity not captured by CUR"
+  },
+  "caps": [
+    {
+      "label": "OpenSearch compute",
+      "product_ilike": "%OpenSearch%",
+      "gcp_service_ilike": "%Compute%",
+      "ceiling": 0.70,
+      "architecture_note": "architecture review recommended: multiple valid GCP targets exist (Managed OpenSearch via Marketplace, Elastic Cloud, Vertex AI Search, or self-managed GCE); self-managed GCE assumed — verify migration strategy with customer"
+    },
+    {
+      "label": "MSK/Kafka",
+      "product_ilike_patterns": ["%Managed Streaming%", "%MSK%", "%Kafka%"],
+      "gcp_service_ilike": null,
+      "ceiling": 0.70,
+      "architecture_note": "architecture review recommended: MSK modeled as VM-only; replication factor, broker topology, and managed storage scaling are not captured by CUR and require separate assessment"
+    },
+    {
+      "label": "RDS/Aurora",
+      "product_ilike_patterns": ["%Relational Database%", "%RDS%", "%Aurora%"],
+      "gcp_service_ilike": null,
+      "ceiling": 0.72,
+      "architecture_note": "CUR does not reveal HA intent beyond Multi-AZ flag, storage latency requirements, connection limits, or read replica topology; verify Cloud SQL tier and HA config with customer"
+    },
+    {
+      "label": "ElastiCache",
+      "product_ilike_patterns": ["%ElastiCache%", "%MemoryDB%"],
+      "gcp_service_ilike": null,
+      "ceiling": 0.72,
+      "architecture_note": "ElastiCache cluster topology and multi-AZ failover not fully captured by CUR; verify Memorystore tier selection"
+    }
+  ]
+}

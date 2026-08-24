@@ -1,0 +1,74 @@
+{
+  "_meta": {
+    "description": "Override validation rules for Phase 3 (and Phase 5). The LLM agent reads and applies these before writing any override decision. Update here — no Python changes needed.",
+    "maintained_by": "LLM agent — add new rules when a new class of bad override is discovered"
+  },
+  "rules": [
+    {
+      "id": "sku_exists_in_region",
+      "severity": "BLOCK",
+      "description": "The gcp_sku_id must exist AND must cover the row's gcp_region. Use find-sku.sh to verify before writing an override. A SKU that exists in us-east4 but not in asia-south1 will produce $0 cost in that region — same silent failure as no SKU at all.",
+      "how_to_check": "Run: bash scripts/find-sku.sh \"<gcp_service>\" \"<gcp_region>\" and confirm the returned SKU ID matches what you plan to write. If find-sku.sh returns nothing, the SKU does not cover that region — use veto or find the correct regional SKU.",
+      "on_fail": "Use veto and document that no regional SKU was found."
+    },
+    {
+      "id": "no_intentional_passthrough_override",
+      "severity": "BLOCK",
+      "description": "A row whose projection_note contains 'no GCP equivalent', 'no GCS equivalent', or 'no direct GCP equivalent' was intentionally left as passthrough by a static mapper because no real GCP service exists for it. Overriding it to strategy=map invents a false mapping.",
+      "how_to_check": "Read the row's projection_note from review_flags.md. If it contains any of the intentional-passthrough phrases, do NOT override.",
+      "on_fail": "Use veto, citing the intentional passthrough note."
+    },
+    {
+      "id": "tier_safety_sustained_to_burstable",
+      "severity": "BLOCK",
+      "description": "A sustained-performance AWS source (any non-t-family EC2: m5, c5, r6g, etc.) must never be mapped to a burstable GCP family (E2, T2A Arm). These families use CPU-credit billing — the customer's SLA changes silently. This is a binary-compatibility boundary, not a cost tradeoff.",
+      "how_to_check": "Look at the row's usage_type or instance_type. If it is NOT a t2/t3/t3a/t4g instance AND the gcp_sku_name starts with 'E2' or 'T2A Arm', reject.",
+      "on_fail": "Reject the override. Find a sustained GCP family (N2, N4, C3, etc.) for the source's workload type."
+    },
+    {
+      "id": "multiplier_positive",
+      "severity": "BLOCK",
+      "description": "unit_multiplier must be strictly greater than zero. GCP cost = usage × multiplier × rate. A zero or negative multiplier produces $0 GCP cost regardless of the rate — an invisible silent error in the final report.",
+      "how_to_check": "Confirm the value you plan to write is > 0.",
+      "on_fail": "Do not write the override. Determine the correct multiplier from the instance spec (vCPUs for core component, RAM GiB for ram component)."
+    },
+    {
+      "id": "multiplier_dimensional_correctness",
+      "severity": "BLOCK",
+      "description": "The unit_multiplier must have the right physical dimension for its component: core → number of vCPUs (typically 1–192), ram → RAM in GiB (typically 0.5–24576). Cross-component errors (vCPU value in the ram row, or GB value in the core row) produce a projection that is orders-of-magnitude wrong.",
+      "how_to_check": "For core rows: multiplier should equal instance_vcpus from aws_li_catalog. For ram rows: multiplier should equal instance_ram_gb. Cross-reference the instance spec if unsure.",
+      "on_fail": "Correct the component assignment or the multiplier value before writing."
+    },
+    {
+      "id": "multiplier_sanity_bounds",
+      "severity": "WARN",
+      "description": "Sanity check: vCPU multiplier > 512 or RAM multiplier > 8192 GB is unusual and likely a data-entry error (e.g. confusing instance count with vCPU count, or writing bytes instead of GiB). Flag in reason but do not auto-block — some bare-metal or HPC instances are genuinely large.",
+      "how_to_check": "If core multiplier > 512 or ram multiplier > 8192, double-check against the actual AWS instance spec before writing.",
+      "on_fail": "Write the override but include a note in reason: 'Verified against instance spec — confirmed correct.'"
+    },
+    {
+      "id": "service_sku_consistency",
+      "severity": "BLOCK",
+      "description": "The gcp_sku_id must belong to the gcp_service you are specifying. A Compute Engine SKU paired with gcp_service='Cloud SQL' will mismatch rate lookups and produce wrong pricing. The find-sku.sh output shows which service owns each SKU.",
+      "how_to_check": "The service in find-sku.sh output must match gcp_service in your override.",
+      "on_fail": "Correct gcp_service to match the SKU's actual service, or find the right SKU for the intended service."
+    },
+    {
+      "id": "no_hallucinated_sku_format",
+      "severity": "BLOCK",
+      "description": "GCP SKU IDs follow the pattern XXXX-XXXX-XXXX (three 4-character hex groups). Any other format is not a real GCP SKU ID. Do not invent IDs — always get them from find-sku.sh or the bundled catalog.",
+      "how_to_check": "Verify the gcp_sku_id matches the regex: [0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4} (case-insensitive). If it doesn't, it is not a real SKU.",
+      "on_fail": "Run find-sku.sh to get a real SKU ID. Never write an invented one."
+    }
+  ],
+  "gcp_api_knowledge_sources": [
+    "GCP Cloud Billing Catalog API: https://cloud.google.com/billing/docs/reference/rest/v1/services.skus/list",
+    "GCP Compute Engine pricing: https://cloud.google.com/compute/vm-instance-pricing",
+    "GCP Cloud SQL pricing: https://cloud.google.com/sql/pricing",
+    "GCP Memorystore pricing: https://cloud.google.com/memorystore/docs/redis/pricing",
+    "GCP BigQuery pricing: https://cloud.google.com/bigquery/pricing",
+    "GCP GCS pricing: https://cloud.google.com/storage/pricing",
+    "AWS EC2 instance specs: https://aws.amazon.com/ec2/instance-types/",
+    "AWS ElastiCache node specs: https://aws.amazon.com/elasticache/pricing/"
+  ]
+}

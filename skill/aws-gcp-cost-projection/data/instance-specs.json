@@ -1,0 +1,93 @@
+{
+  "_meta": {
+    "description": "AWS instance spec tables. Add new entries here when a new instance type appears — no Python changes needed.",
+    "maintained_by": "LLM agent — update this file directly when a new instance type is missing"
+  },
+  "elasticache_ram_gib": {
+    "cache.t2.micro": 0.555, "cache.t2.small": 1.55, "cache.t2.medium": 3.22,
+    "cache.t3.micro": 0.555, "cache.t3.small": 1.42, "cache.t3.medium": 3.09,
+    "cache.t4g.micro": 0.555, "cache.t4g.small": 1.42, "cache.t4g.medium": 3.09,
+    "cache.m5.large": 6.38, "cache.m5.xlarge": 12.93, "cache.m5.2xlarge": 26.04,
+    "cache.m5.4xlarge": 52.82, "cache.m5.12xlarge": 157.12, "cache.m5.24xlarge": 314.32,
+    "cache.m6g.large": 6.38, "cache.m6g.xlarge": 12.93, "cache.m6g.2xlarge": 26.04,
+    "cache.m6g.4xlarge": 52.82, "cache.m6g.8xlarge": 103.68, "cache.m6g.12xlarge": 157.12,
+    "cache.m6g.16xlarge": 209.55,
+    "cache.m7g.large": 6.38, "cache.m7g.xlarge": 12.93, "cache.m7g.2xlarge": 26.04,
+    "cache.m7g.4xlarge": 52.82, "cache.m7g.8xlarge": 103.68, "cache.m7g.12xlarge": 157.12,
+    "cache.m7g.16xlarge": 209.55,
+    "cache.r5.large": 13.07, "cache.r5.xlarge": 26.24, "cache.r5.2xlarge": 52.82,
+    "cache.r5.4xlarge": 105.81, "cache.r5.12xlarge": 317.77, "cache.r5.24xlarge": 635.61,
+    "cache.r6g.large": 13.07, "cache.r6g.xlarge": 26.24, "cache.r6g.2xlarge": 52.82,
+    "cache.r6g.4xlarge": 105.81, "cache.r6g.8xlarge": 209.55, "cache.r6g.12xlarge": 317.77,
+    "cache.r6g.16xlarge": 423.48,
+    "cache.r7g.large": 13.07, "cache.r7g.xlarge": 26.24, "cache.r7g.2xlarge": 52.82,
+    "cache.r7g.4xlarge": 105.81, "cache.r7g.8xlarge": 209.55, "cache.r7g.12xlarge": 317.77,
+    "cache.r7g.16xlarge": 423.48
+  },
+  "redshift_slot_map": {
+    "dc2.large": 500, "dc2.8xlarge": 4000,
+    "ds2.xlarge": 500, "ds2.8xlarge": 4000,
+    "ra3.large": 250,
+    "ra3.xlplus": 500, "ra3.4xlarge": 1500, "ra3.16xlarge": 6000
+  },
+  "emr_vcpu_map": {
+    "m5.xlarge": 4, "m5.2xlarge": 8, "m5.4xlarge": 16, "m5.8xlarge": 32,
+    "m5.12xlarge": 48, "m5.16xlarge": 64, "m5.24xlarge": 96,
+    "m5a.xlarge": 4, "m5a.2xlarge": 8, "m5a.4xlarge": 16, "m5a.8xlarge": 32,
+    "m6i.xlarge": 4, "m6i.2xlarge": 8, "m6i.4xlarge": 16, "m6i.8xlarge": 32,
+    "m6g.xlarge": 4, "m6g.2xlarge": 8, "m6g.4xlarge": 16, "m6g.8xlarge": 32,
+    "m6a.xlarge": 4, "m6a.2xlarge": 8, "m6a.4xlarge": 16, "m6a.8xlarge": 32,
+    "m7i.xlarge": 4, "m7i.2xlarge": 8, "m7i.4xlarge": 16, "m7i.8xlarge": 32,
+    "m7g.xlarge": 4, "m7g.2xlarge": 8, "m7g.4xlarge": 16, "m7g.8xlarge": 32,
+    "r5.xlarge": 4, "r5.2xlarge": 8, "r5.4xlarge": 16, "r5.8xlarge": 32,
+    "r5.12xlarge": 48, "r5.16xlarge": 64, "r5.24xlarge": 96,
+    "r6i.xlarge": 4, "r6i.2xlarge": 8, "r6i.4xlarge": 16, "r6i.8xlarge": 32,
+    "r6g.xlarge": 4, "r6g.2xlarge": 8, "r6g.4xlarge": 16, "r6g.8xlarge": 32,
+    "r7i.xlarge": 4, "r7i.2xlarge": 8, "r7i.4xlarge": 16, "r7i.8xlarge": 32,
+    "r7g.xlarge": 4, "r7g.2xlarge": 8, "r7g.4xlarge": 16, "r7g.8xlarge": 32,
+    "c5.xlarge": 4, "c5.2xlarge": 8, "c5.4xlarge": 16, "c5.9xlarge": 36, "c5.18xlarge": 72,
+    "c6i.xlarge": 4, "c6i.2xlarge": 8, "c6i.4xlarge": 16, "c6i.8xlarge": 32,
+    "c6g.xlarge": 4, "c6g.2xlarge": 8, "c6g.4xlarge": 16, "c6g.8xlarge": 32,
+    "c7i.xlarge": 4, "c7i.2xlarge": 8, "c7i.4xlarge": 16, "c7i.8xlarge": 32,
+    "c7g.xlarge": 4, "c7g.2xlarge": 8, "c7g.4xlarge": 16, "c7g.8xlarge": 32,
+    "i3.xlarge": 4, "i3.2xlarge": 8, "i3.4xlarge": 16, "i3.8xlarge": 32,
+    "i3en.xlarge": 4, "i3en.2xlarge": 8, "i3en.3xlarge": 12, "i3en.6xlarge": 24,
+    "i3en.12xlarge": 48, "i3en.24xlarge": 96,
+    "p3.2xlarge": 8, "p3.8xlarge": 32, "p3.16xlarge": 64,
+    "g4dn.xlarge": 4, "g4dn.2xlarge": 8, "g4dn.4xlarge": 16, "g4dn.8xlarge": 32
+  },
+  "burstable_ec2_specs": {
+    "t2.nano": [1, 0.5], "t2.micro": [1, 1.0], "t2.small": [1, 2.0],
+    "t2.medium": [2, 4.0], "t2.large": [2, 8.0], "t2.xlarge": [4, 16.0], "t2.2xlarge": [8, 32.0],
+    "t3.nano": [2, 0.5], "t3.micro": [2, 1.0], "t3.small": [2, 2.0],
+    "t3.medium": [2, 4.0], "t3.large": [2, 8.0], "t3.xlarge": [4, 16.0], "t3.2xlarge": [8, 32.0],
+    "t3a.nano": [2, 0.5], "t3a.micro": [2, 1.0], "t3a.small": [2, 2.0],
+    "t3a.medium": [2, 4.0], "t3a.large": [2, 8.0], "t3a.xlarge": [4, 16.0], "t3a.2xlarge": [8, 32.0],
+    "t4g.nano": [2, 0.5], "t4g.micro": [2, 1.0], "t4g.small": [2, 2.0],
+    "t4g.medium": [2, 4.0], "t4g.large": [2, 8.0], "t4g.xlarge": [4, 16.0], "t4g.2xlarge": [8, 32.0]
+  },
+  "ec2_size_vcpu_fallback": {
+    "_comment": "Size token → vCPU count for standard families (not burstable). Use burstable_ec2_specs for t2/t3/t3a/t4g. Prefer instance_vcpus from aws_li_catalog over this table.",
+    "nano": 1, "micro": 1, "small": 1,
+    "medium": 1,
+    "large": 2,
+    "xlarge": 4,
+    "2xlarge": 8,
+    "4xlarge": 16,
+    "8xlarge": 32,
+    "12xlarge": 48,
+    "16xlarge": 64,
+    "24xlarge": 96,
+    "32xlarge": 128,
+    "48xlarge": 192,
+    "metal": null
+  },
+  "arm_ram_ratio": {
+    "c": 2.0, "m": 4.0, "r": 8.0, "x": 16.0, "i": 4.0, "h": 4.0
+  },
+  "arm_size_vcpu_non_t4g_override": { "medium": 1 },
+  "t4g_size_ram": {
+    "nano": 0.5, "micro": 1.0, "small": 2.0, "medium": 4.0,
+    "large": 8.0, "xlarge": 16.0, "2xlarge": 32.0
+  }
+}

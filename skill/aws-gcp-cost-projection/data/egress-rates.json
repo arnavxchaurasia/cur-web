@@ -1,0 +1,59 @@
+{
+  "_meta": {
+    "description": "GCP network egress canonical rates. Update rates here when GCP changes published list prices.",
+    "maintained_by": "LLM agent — update rate_usd_per_gb values when GCP publishes new pricing"
+  },
+  "egress_skus": {
+    "interzone":   {"sku_id": "GCP-EGRESS-INTERZONE",   "sku_name": "Network Inter Zone Egress",   "rate_usd_per_gb": 0.01},
+    "interregion": {"sku_id": "GCP-EGRESS-INTERREGION", "sku_name": "Network Inter Region Egress", "rate_usd_per_gb": 0.08},
+    "internet":    {"sku_id": "GCP-EGRESS-INTERNET",    "sku_name": "Network Internet Egress",     "rate_usd_per_gb": 0.12}
+  },
+  "cdn_egress": {
+    "_meta": "Cloud CDN Cache Egress rates by destination bucket. Tiers in GB (1 TB = 1024 GB). Source: cloud.google.com/cdn/pricing — verify before finalizing.",
+    "apac": {
+      "sku_id": "GCP-CDN-EGRESS-APAC",
+      "sku_name": "Cloud CDN Cache Egress - APAC",
+      "tiers": [
+        {"up_to_gb": 10240,  "rate_usd_per_gb": 0.08},
+        {"up_to_gb": 153600, "rate_usd_per_gb": 0.06},
+        {"up_to_gb": null,   "rate_usd_per_gb": 0.05}
+      ]
+    },
+    "americas": {
+      "sku_id": "GCP-CDN-EGRESS-AMERICAS",
+      "sku_name": "Cloud CDN Cache Egress - Americas",
+      "tiers": [
+        {"up_to_gb": 10240,  "rate_usd_per_gb": 0.08},
+        {"up_to_gb": 153600, "rate_usd_per_gb": 0.06},
+        {"up_to_gb": null,   "rate_usd_per_gb": 0.05}
+      ]
+    },
+    "emea": {
+      "sku_id": "GCP-CDN-EGRESS-EMEA",
+      "sku_name": "Cloud CDN Cache Egress - EMEA",
+      "tiers": [
+        {"up_to_gb": 10240,  "rate_usd_per_gb": 0.08},
+        {"up_to_gb": 153600, "rate_usd_per_gb": 0.06},
+        {"up_to_gb": null,   "rate_usd_per_gb": 0.05}
+      ]
+    },
+    "apac_au": {
+      "sku_id": "GCP-CDN-EGRESS-APAC-AU",
+      "sku_name": "Cloud CDN Cache Egress - Australia",
+      "tiers": [
+        {"up_to_gb": 10240,  "rate_usd_per_gb": 0.12},
+        {"up_to_gb": 153600, "rate_usd_per_gb": 0.09},
+        {"up_to_gb": null,   "rate_usd_per_gb": 0.07}
+      ]
+    },
+    "china": {
+      "sku_id": "GCP-CDN-EGRESS-CHINA",
+      "sku_name": "Cloud CDN Cache Egress - China",
+      "tiers": [
+        {"up_to_gb": 512,  "rate_usd_per_gb": 0.20},
+        {"up_to_gb": 2048, "rate_usd_per_gb": 0.18},
+        {"up_to_gb": null, "rate_usd_per_gb": 0.17}
+      ]
+    }
+  }
+}

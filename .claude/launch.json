@@ -1,0 +1,18 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "backend-dev",
+      "runtimeExecutable": "go",
+      "runtimeArgs": ["run", "./cmd/server"],
+      "port": 8080
+    },
+    {
+      "name": "frontend-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--prefix", "frontend"],
+      "port": 5173,
+      "url": "http://localhost:5173"
+    }
+  ]
+}

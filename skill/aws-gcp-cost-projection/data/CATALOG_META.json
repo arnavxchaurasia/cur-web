@@ -1,0 +1,8 @@
+{
+  "fetched_at": "2026-07-27T06:50:51Z",
+  "source": "https://cloudbilling.googleapis.com/v1/services/{id}/skus",
+  "service_count": 110,
+  "sku_count": 85952,
+  "filter": "first-party (curated allow-list excludes marketplace VM images and 3rd-party integrations)",
+  "refresh_command": "scripts/refresh-catalog.sh"
+}

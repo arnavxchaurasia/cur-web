@@ -1,0 +1,103 @@
+{
+  "_meta": {
+    "description": "Phase 3 and Phase 5 policy thresholds. Adjust here — no Python changes needed.",
+    "maintained_by": "LLM agent — tune thresholds here when review or outlier volume is too high or too low"
+  },
+
+  "passthrough_materiality_usd": 5.0,
+  "max_unit_multiplier_vcpu": 512,
+  "max_unit_multiplier_ram_gb": 8192,
+
+  "_comment_outliers": "All thresholds used by detect_outliers.py AND outlier_gate.py. Change here; no Python edits needed.",
+
+  "_comment_backcheck": "Back-check bounds used by Phase 2 agents (see phases/02-mapping/_shared.md).",
+  "backcheck_ratio_min": 0.33,
+  "backcheck_ratio_max": 3.0,
+  "backcheck_branch_a_aws_floor_usd": 1.0,
+  "backcheck_branch_b_gcp_ceiling_usd": 10.0,
+  "passthrough_budget_max_fraction": 0.05,
+
+  "_comment_confidence": "Mapping confidence floors per scenario. Used by Phase 2 agents. Keys match exactly what prompt files reference.",
+  "confidence_compute_verified": 0.92,
+  "confidence_compute_arm_fallback_x86": 0.72,
+  "confidence_compute_vcpu_from_size_token": 0.75,
+  "confidence_compute_single_candidate": 0.80,
+  "confidence_block_storage_verified": 0.88,
+  "confidence_block_storage_io2_block_express": 0.85,
+  "confidence_block_storage_efs_filestore": 0.72,
+  "confidence_block_storage_aurora": 0.88,
+  "confidence_object_storage_standard": 0.92,
+  "confidence_object_storage_ia_nearline": 0.85,
+  "confidence_object_storage_glacier": 0.82,
+  "confidence_object_storage_intelligent_tiering": 0.78,
+  "confidence_db_verified": 0.88,
+  "confidence_db_aurora_alloydb": 0.80,
+  "confidence_db_arm_enterprise_plus": 0.82,
+  "confidence_db_oracle_cross_engine": 0.55,
+  "confidence_db_memcached": 0.85,
+  "confidence_db_redis_cluster": 0.85,
+  "confidence_transfer_internet_egress": 0.88,
+  "confidence_transfer_interzone": 0.90,
+  "confidence_transfer_nat": 0.82,
+  "confidence_transfer_cloudfront_cdn": 0.75,
+  "confidence_gpu_verified": 0.88,
+  "confidence_gpu_generation_upgrade": 0.80,
+  "confidence_gpu_legacy_to_modern": 0.75,
+  "confidence_gpu_region_fallback": 0.70,
+  "confidence_misc_service_hint_verified": 0.82,
+  "confidence_misc_service_hint_assumed": 0.65,
+  "confidence_misc_no_hint_matched": 0.55,
+  "confidence_passthrough": 0.30,
+
+  "_comment_outlier_gate": "Thresholds for outlier_gate.py hard-clamp rules. Change here; no Python edits needed.",
+  "outlier_gate_r1_aws_floor_usd": 1.0,
+  "outlier_gate_r1_ratio": 50,
+  "outlier_gate_r1_gcp_floor_usd": 25.0,
+  "outlier_gate_r2_gcp_abs_usd": 10000.0,
+  "outlier_gate_r2_aws_max_usd": 100.0,
+  "outlier_gate_r3_inflation_ratio": 1.5,
+  "outlier_gate_r4_whole_bill_ratio": 2.0,
+  "outlier_gate_r5_aws_floor_usd": 50.0,
+  "outlier_gate_r5_gcp_ratio": 0.10,
+  "outlier_gate_storage_ok_products": [
+    "simple storage service",
+    "glacier",
+    "storage gateway"
+  ],
+
+  "outlier_pattern_summary_threshold": 20,
+  "outlier_pattern_summary_top_n_stderr": 5,
+  "outlier_pattern_summary_top_n_file": 10,
+
+  "outlier_cud_services": [
+    "Compute Engine",
+    "Cloud SQL",
+    "AlloyDB",
+    "Cloud Memorystore",
+    "Cloud Memorystore for Redis",
+    "Cloud Memorystore for Memcached"
+  ],
+
+  "outlier_a1_cost_floor_usd": 50,
+  "outlier_a1_ratio_compute_sql_memorystore": 1.3,
+  "outlier_a1_ratio_other": 1.5,
+
+  "outlier_a2_cost_floor_usd": 1,
+  "outlier_a2_ratio_upper": 10,
+  "outlier_a2_ratio_lower": 0.05,
+
+  "outlier_b_aws_cost_max_usd": 1,
+  "outlier_b_gcp_cost_min_usd": 10,
+
+  "outlier_c_cost_floor_usd": 50,
+
+  "outlier_f_cost_floor_usd": 20,
+  "outlier_f_ratio": 2.0,
+
+  "outlier_h_cost_floor_usd": 10,
+
+  "outlier_i_cost_floor_usd": 1,
+
+  "outlier_g_core_delta_tolerance": 0.5,
+  "outlier_g_ram_delta_tolerance": 1.0
+}

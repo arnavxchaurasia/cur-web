@@ -1,0 +1,20 @@
+[Unit]
+Description=CUR Web App
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+EnvironmentFile=/etc/cur-web/env
+ExecStart=/usr/local/bin/cur-web
+Restart=on-failure
+RestartSec=5
+
+# Kill only the main pid on stop/restart so spawned claude jobs (which Setsid
+# into their own session) survive a systemctl restart of cur-web. Without this,
+# the default control-group mode would SIGTERM every process in the unit's
+# cgroup, killing in-flight jobs.
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target

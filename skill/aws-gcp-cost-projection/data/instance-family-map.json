@@ -1,0 +1,48 @@
+{
+  "_note": "DETERMINISTIC AWS-instance -> GCP machine-family map. Phase 2 MUST use this instead of a per-row 60/40 price-performance judgment, so the same AWS instance type ALWAYS maps to the same GCP family on every run. This is the single biggest source of run-to-run GCP-cost variance: when family choice is left to the model, c5.9xlarge maps to N2D on one run and N2 on the next, swinging the total by ~50%. validate_fix.py enforces this via the instance_family_mismatch gate.",
+  "_resolution_order": [
+    "1. arm64 / Graviton (*g/*gd/a1/t4g): -> C4A Axion (standard 4GB/vCPU for c/m Graviton; highmem 8GB/vCPU for r Graviton). C4A available in 28 regions incl. asia-south1. T2A is only 5 regions — use as last resort.",
+    "2. Burstable x86 (t2/t3/t3a): -> E2 (GCP cost-optimized burstable, no per-credit charge).",
+    "3. x86 memory-optimized >=6 GB/vCPU (r5/r6i/r6a/r7i/r7a): -> N2 (8 GB/vCPU). DO NOT use N2D (only 4 GB/vCPU) — it doubles vCPU count and inflates cost.",
+    "4. x86 ultra-memory >=12 GB/vCPU (x1e/x2i/u-*): -> M3 (16 GB/vCPU, available in major regions incl. asia-south1).",
+    "5. All other x86 (c/m general + compute-optimized, <=4 GB/vCPU): -> N2D AMD (best 60/40 price-performance, ~30% cheaper than N2)."
+  ],
+  "rules": {
+    "arm64_preferred": "C4A",
+    "arm64_highmem": "C4A_HIGHMEM",
+    "arm64_fallback": "T2A",
+    "arm64_final_fallback": "N2D",
+    "arm64_any": "C4A",
+    "burstable_prefixes": ["t2", "t3", "t3a"],
+    "burstable_family": "E2",
+    "memory_optimized_threshold_gb_per_vcpu": 6,
+    "memory_optimized_family": "N2",
+    "ultra_memory_threshold_gb_per_vcpu": 12,
+    "ultra_memory_family": "M3",
+    "default_x86": "N2D"
+  },
+  "examples": {
+    "c5.9xlarge":   "N2D",
+    "c5a.4xlarge":  "N2D",
+    "c4.8xlarge":   "N2D",
+    "c3.2xlarge":   "N2D",
+    "m5.2xlarge":   "N2D",
+    "m6i.xlarge":   "N2D",
+    "r5.2xlarge":   "N2",
+    "r6i.large":    "N2",
+    "r6a.xlarge":   "N2",
+    "r7i.2xlarge":  "N2",
+    "x1e.xlarge":   "M3",
+    "x2i.4xlarge":  "M3",
+    "t2.2xlarge":   "E2",
+    "t3.large":     "E2",
+    "t3a.xlarge":   "E2",
+    "m6g.large":    "C4A",
+    "c6g.8xlarge":  "C4A",
+    "c7g.2xlarge":  "C4A",
+    "r6g.2xlarge":  "C4A_HIGHMEM",
+    "r7g.xlarge":   "C4A_HIGHMEM",
+    "a1.2xlarge":   "C4A",
+    "t4g.medium":   "C4A"
+  }
+}

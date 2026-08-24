@@ -1,0 +1,184 @@
+@import "tailwindcss";
+
+:root {
+  --facets-purple: #645DF6;
+  --facets-teal: #00C2BB;
+}
+
+/* ── Global page base ───────────────────────────────────────── */
+body {
+  background-color: #0a0a0f;
+  /* subtle dot grid */
+  background-image: radial-gradient(rgba(255,255,255,0.032) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+/* ── Custom scrollbar ───────────────────────────────────────── */
+::-webkit-scrollbar              { width: 5px; height: 5px; }
+::-webkit-scrollbar-track        { background: transparent; }
+::-webkit-scrollbar-thumb        { background: rgba(100,93,246,0.35); border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover  { background: rgba(100,93,246,0.65); }
+
+/* ── Input / textarea focus glow ────────────────────────────── */
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(100,93,246,0.22);
+}
+
+/* ── Keyframes ──────────────────────────────────────────────── */
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes slide-down {
+  from { opacity: 0; transform: translateY(-10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes shimmer-sweep {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+@keyframes glow-breathe {
+  0%, 100% { box-shadow: 0 0 14px rgba(100,93,246,0.3), 0 0 28px rgba(0,194,187,0.1); }
+  50%       { box-shadow: 0 0 28px rgba(100,93,246,0.55), 0 0 56px rgba(0,194,187,0.22); }
+}
+@keyframes border-pulse {
+  0%, 100% { border-color: rgba(100,93,246,0.5); }
+  50%       { border-color: rgba(100,93,246,1); }
+}
+@keyframes float-orb {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33%       { transform: translate(20px, -15px) scale(1.05); }
+  66%       { transform: translate(-15px, 10px) scale(0.97); }
+}
+
+/* ── Utility animation classes ──────────────────────────────── */
+.anim-fade-in-up  { animation: fade-in-up  0.5s cubic-bezier(0.22,1,0.36,1) both; }
+.anim-fade-in     { animation: fade-in     0.4s ease-out both; }
+.anim-slide-down  { animation: slide-down  0.35s cubic-bezier(0.22,1,0.36,1) both; }
+.anim-scale-in    { animation: scale-in    0.3s cubic-bezier(0.22,1,0.36,1) both; }
+.anim-glow-breathe { animation: glow-breathe 2.8s ease-in-out infinite; }
+
+/* ── Stagger delays ─────────────────────────────────────────── */
+.delay-50  { animation-delay: 50ms; }
+.delay-100 { animation-delay: 100ms; }
+.delay-175 { animation-delay: 175ms; }
+.delay-250 { animation-delay: 250ms; }
+.delay-325 { animation-delay: 325ms; }
+.delay-400 { animation-delay: 400ms; }
+.delay-500 { animation-delay: 500ms; }
+
+/* ── Scroll reveal — pure opacity fade, fires once and stays ── */
+.reveal {
+  opacity: 0;
+}
+.reveal.reveal-visible {
+  opacity: 1;
+  transition: opacity 0.7s ease;
+}
+
+/* ── Shimmer gradient button ────────────────────────────────── */
+.btn-shimmer {
+  background: linear-gradient(90deg, #645DF6 0%, #00C2BB 50%, #645DF6 100%);
+  background-size: 200% 100%;
+  animation: shimmer-sweep 3s linear infinite;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+.btn-shimmer:not(:disabled):hover  { transform: translateY(-1px); }
+.btn-shimmer:not(:disabled):active { transform: translateY(0); }
+.btn-shimmer:disabled { animation: none; }
+
+/* ── Login page background ──────────────────────────────────── */
+.login-bg {
+  background:
+    radial-gradient(ellipse 90% 55% at 50% -5%,  rgba(100,93,246,0.2)  0%, transparent 65%),
+    radial-gradient(ellipse 55% 45% at 85% 85%,  rgba(0,194,187,0.12) 0%, transparent 55%),
+    #0a0a0f;
+}
+.login-orb {
+  animation: float-orb 12s ease-in-out infinite;
+  will-change: transform;
+}
+
+/* ── Card hover lift ────────────────────────────────────────── */
+.card-lift {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.card-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 28px rgba(100,93,246,0.14);
+}
+
+/* ── DropZone drag ──────────────────────────────────────────── */
+.dropzone-drag {
+  border-color: #645DF6 !important;
+  background: rgba(100,93,246,0.08) !important;
+  animation: border-pulse 1s ease-in-out infinite;
+  transform: scale(1.01);
+  transition: transform 0.15s ease;
+}
+
+/* ── Phase bar ──────────────────────────────────────────────── */
+.phase-bar-done {
+  transform-origin: left;
+  animation: scale-in 0.4s cubic-bezier(0.22,1,0.36,1) both;
+}
+
+/* ── Nav hover links ────────────────────────────────────────── */
+.nav-link {
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+.nav-link:hover { opacity: 0.75; }
+
+/* ── Phase label fade on change ─────────────────────────────── */
+@keyframes phase-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.phase-label-enter {
+  animation: phase-fade-in 0.3s cubic-bezier(0.22,1,0.36,1) both;
+}
+
+/* ── Summary card gradient border ──────────────────────────── */
+.summary-card {
+  position: relative;
+  background: rgba(255,255,255,0.02);
+  border-radius: 0.5rem;
+}
+.summary-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 0.5rem;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(100,93,246,0.55), rgba(0,194,187,0.35));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* ── Reduced motion ─────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .anim-fade-in-up, .anim-fade-in, .anim-slide-down,
+  .anim-scale-in, .anim-glow-breathe, .btn-shimmer,
+  .phase-bar-done, .login-orb {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+  .reveal, .reveal.reveal-visible { opacity: 1; transform: none; transition: none; }
+  .card-lift:hover { transform: none; box-shadow: none; }
+  .dropzone-drag   { animation: none; transform: none; }
+}

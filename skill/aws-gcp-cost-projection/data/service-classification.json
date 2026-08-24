@@ -1,0 +1,169 @@
+{
+  "_meta": {
+    "description": "AWS service classification rules for passthrough, self-host, sizing, and misc mappings. Add new services here — no Python changes needed.",
+    "maintained_by": "LLM agent — update this file directly when a new AWS service needs classification"
+  },
+  "passthrough_services": [
+    "Simple Email",
+    "SES",
+    "Inferentia",
+    "Trainium"
+  ],
+  "self_host_on_gce": [
+    "OpenSearch",
+    "Elasticsearch",
+    "Managed Streaming for Apache Kafka",
+    "MSK",
+    "Kafka"
+  ],
+  "sizing_sensitive": [
+    "EKS",
+    "ECS",
+    "Glue"
+  ],
+  "intentional_passthrough_note_ilike": [
+    "%no GCS equivalent%",
+    "%no GCP equivalent%",
+    "%no direct GCP equivalent%"
+  ],
+  "misc_service_hints": [
+    {
+      "key": "ec2",
+      "product_name": "Amazon Elastic Compute Cloud",
+      "fields": {"gcp_service": "Compute Engine"},
+      "extra_fields": {}
+    },
+    {
+      "key": "rds",
+      "product_name": "Amazon Relational Database Service",
+      "fields": {"gcp_service": "Cloud SQL"},
+      "extra_fields": {}
+    },
+    {
+      "key": "s3",
+      "product_name": "Amazon Simple Storage Service",
+      "fields": {"gcp_service": "Cloud Storage"},
+      "extra_fields": {}
+    },
+    {
+      "key": "lambda",
+      "product_name": "AWS Lambda",
+      "fields": {"gcp_service": "Cloud Run functions"},
+      "extra_fields": {}
+    },
+    {
+      "key": "cloudfront",
+      "product_name": "Amazon CloudFront",
+      "fields": {"gcp_service": "Cloud CDN"},
+      "extra_fields": {}
+    },
+    {
+      "key": "dynamodb",
+      "product_name": "Amazon DynamoDB",
+      "fields": {"gcp_service": "Cloud Bigtable"},
+      "extra_fields": {}
+    },
+    {
+      "key": "elasticache",
+      "product_name": "Amazon ElastiCache",
+      "fields": {"gcp_service": "Memorystore"},
+      "extra_fields": {}
+    },
+    {
+      "key": "eks",
+      "product_name": "Amazon Elastic Kubernetes Service",
+      "fields": {"gcp_service": "Google Kubernetes Engine"},
+      "extra_fields": {}
+    },
+    {
+      "key": "ecs",
+      "product_name": "Amazon Elastic Container Service",
+      "fields": {"gcp_service": "Cloud Run"},
+      "extra_fields": {}
+    },
+    {
+      "key": "emr",
+      "product_name": "Amazon EMR",
+      "fields": {"gcp_service": "Dataproc"},
+      "extra_fields": {}
+    },
+    {
+      "key": "redshift",
+      "product_name": "Amazon Redshift",
+      "fields": {"gcp_service": "BigQuery"},
+      "extra_fields": {}
+    },
+    {
+      "key": "kinesis",
+      "product_name": "Amazon Kinesis",
+      "fields": {"gcp_service": "Pub/Sub"},
+      "extra_fields": {}
+    },
+    {
+      "key": "sqs",
+      "product_name": "Amazon Simple Queue Service",
+      "fields": {"gcp_service": "Pub/Sub"},
+      "extra_fields": {}
+    },
+    {
+      "key": "sns",
+      "product_name": "Amazon Simple Notification Service",
+      "fields": {"gcp_service": "Pub/Sub"},
+      "extra_fields": {}
+    },
+    {
+      "key": "glue",
+      "product_name": "AWS Glue",
+      "fields": {"gcp_service": "Dataflow"},
+      "extra_fields": {}
+    },
+    {
+      "key": "athena",
+      "product_name": "Amazon Athena",
+      "fields": {"gcp_service": "BigQuery"},
+      "extra_fields": {}
+    },
+    {
+      "key": "opensearch",
+      "product_name": "Amazon OpenSearch Service",
+      "fields": {"gcp_service": "Compute Engine"},
+      "extra_fields": {"strategy": "self_host"}
+    },
+    {
+      "key": "msk",
+      "product_name": "Amazon Managed Streaming for Apache Kafka",
+      "fields": {"gcp_service": "Compute Engine"},
+      "extra_fields": {"strategy": "self_host"}
+    },
+    {
+      "key": "sagemaker",
+      "product_name": "Amazon SageMaker",
+      "fields": {"gcp_service": "Vertex AI"},
+      "extra_fields": {}
+    },
+    {
+      "key": "codebuild",
+      "product_name": "AWS CodeBuild",
+      "fields": {"gcp_service": "Cloud Build"},
+      "extra_fields": {}
+    },
+    {
+      "key": "route53",
+      "product_name": "Amazon Route 53",
+      "fields": {"gcp_service": "Cloud DNS"},
+      "extra_fields": {}
+    },
+    {
+      "key": "waf",
+      "product_name": "AWS WAF",
+      "fields": {"gcp_service": "Cloud Armor"},
+      "extra_fields": {}
+    },
+    {
+      "key": "secretsmanager",
+      "product_name": "AWS Secrets Manager",
+      "fields": {"gcp_service": "Secret Manager"},
+      "extra_fields": {}
+    }
+  ]
+}

@@ -1,0 +1,1331 @@
+{
+  "BigQuery Reservation API|BigQuery Flat Rate Annual for|asia-south1": {
+    "resource_group": "FlatRate",
+    "sku_id": "94D7-AD9A-0107",
+    "unit": "mo"
+  },
+  "BigQuery Reservation API|BigQuery Standard Edition for|asia-south1": {
+    "resource_group": "Edition",
+    "sku_id": "19B9-C643-5561",
+    "unit": "h"
+  },
+  "BigQuery Reservation API|BigQuery Standard Edition for|us-east4": {
+    "resource_group": "Edition",
+    "sku_id": "A37D-8AAE-C9BF",
+    "unit": "h"
+  },
+  "BigQuery|Active Logical Storage|asia-south1": {
+    "resource_group": "ActiveStorage",
+    "sku_id": "E056-7501-89FA",
+    "unit": "GiBy.mo"
+  },
+  "Cloud DNS|ManagedZone|global": "8C22-6FC3-D478",
+  "Cloud Filestore|Filestore Capacity Basic HDD \\(Standard\\)|asia-south1": "637E-F5F6-8B5E",
+  "Cloud Filestore|Filestore Capacity Basic HDD \\(Standard\\)|us-east4": "3B6C-72D5-47D5",
+  "Cloud Filestore|Filestore Capacity Basic HDD|asia-south1": "637E-F5F6-8B5E",
+  "Cloud Filestore|Filestore Capacity Basic HDD|us-east4": "3B6C-72D5-47D5",
+  "Cloud Filestore|Filestore Capacity Basic SSD|asia-south1": {
+    "resource_group": "Filestore",
+    "sku_id": "C43E-3EA5-F42C",
+    "unit": "GiBy.mo"
+  },
+  "Cloud Firestore|Cloud Firestore Entity Writes Northern Virginia|global": {
+    "resource_group": "FirestoreEntityPutOps",
+    "sku_id": "1DD9-7A1B-32D4",
+    "unit": "count"
+  },
+  "Cloud Firestore|Cloud Firestore Entity Writes Northern Virginia|us-east4": {
+    "catalog_version": "2026-07-27T06:50:51Z",
+    "resource_group": null,
+    "sku_id": null,
+    "unit": null
+  },
+  "Cloud Firestore|Cloud\\ Firestore\\ Entity\\ Writes\\ Northern\\ Virginia|global": {
+    "resource_group": "FirestoreEntityPutOps",
+    "sku_id": "1DD9-7A1B-32D4",
+    "unit": "count"
+  },
+  "Cloud Firestore|Entity Writes|global": "0001-48D2-BE14",
+  "Cloud Firestore|Read Ops|global": "03C2-1F50-C09A",
+  "Cloud Key Management Service (KMS)|Active software symmetric key versions|asia-southeast1": "E09C-32B3-9AC7",
+  "Cloud Key Management Service (KMS)|Active software symmetric key versions|global": "E09C-32B3-9AC7",
+  "Cloud Key Management Service (KMS)|Active software symmetric key versions|us-east4": {
+    "resource_group": "KMS",
+    "sku_id": "E09C-32B3-9AC7",
+    "unit": "mo"
+  },
+  "Cloud Key Management Service (KMS)|Active software symmetric key version|asia-south1": "E09C-32B3-9AC7",
+  "Cloud Key Management Service (KMS)|Active software symmetric key version|global": "E09C-32B3-9AC7",
+  "Cloud Key Management Service (KMS)|Active software symmetric key version|us-east4": "E09C-32B3-9AC7",
+  "Cloud Key Management Service (KMS)|Active\\ software\\ symmetric\\ key\\ versions|us-east4": {
+    "resource_group": "KMS",
+    "sku_id": "E09C-32B3-9AC7",
+    "unit": "mo"
+  },
+  "Cloud Key Management Service (KMS)|Cryptographic operations.*software symmetric key|asia-northeast1": "3BDA-77FB-678B",
+  "Cloud Key Management Service (KMS)|Cryptographic operations.*software symmetric key|asia-south1": "3BDA-77FB-678B",
+  "Cloud Key Management Service (KMS)|Cryptographic operations.*software symmetric key|asia-southeast1": "3BDA-77FB-678B",
+  "Cloud Key Management Service (KMS)|Cryptographic operations.*software symmetric key|global": "3BDA-77FB-678B",
+  "Cloud Key Management Service (KMS)|Cryptographic operations.*software symmetric key|us-east4": "3BDA-77FB-678B",
+  "Cloud Key Management Service (KMS)|Cryptographic operations.*software symmetric key|us-west1": "3BDA-77FB-678B",
+  "Cloud Key Management Service (KMS)|Cryptographic operations.*software symmetric key|us-west2": "3BDA-77FB-678B",
+  "Cloud Load Balancing|Cloud Load Balancer Forwarding Rule Minimum|asia-southeast1": {
+    "resource_group": "LoadBalancing",
+    "sku_id": "BD15-114E-9273",
+    "unit": "h"
+  },
+  "Cloud Logging|Log Storage cost|asia-northeast1": "143F-A1B0-E0BE",
+  "Cloud Logging|Log Storage cost|asia-south1": "143F-A1B0-E0BE",
+  "Cloud Logging|Log Storage cost|asia-southeast1": "143F-A1B0-E0BE",
+  "Cloud Logging|Log Storage cost|global": "143F-A1B0-E0BE",
+  "Cloud Logging|Log Storage cost|us-east4": "143F-A1B0-E0BE",
+  "Cloud Logging|Log Storage cost|us-west1": "143F-A1B0-E0BE",
+  "Cloud Logging|Log Storage cost|us-west2": "143F-A1B0-E0BE",
+  "Cloud Memorystore for Memcached|Custom Core M1|asia-south1": "71CD-5CD1-DF6E",
+  "Cloud Memorystore for Memcached|Custom Core M1|asia-southeast1": "D94B-5BF3-1725",
+  "Cloud Memorystore for Memcached|Custom Core M1|us-east4": "B355-C90F-1CBE",
+  "Cloud Memorystore for Memcached|Custom Core|asia-south1": "71CD-5CD1-DF6E",
+  "Cloud Memorystore for Memcached|Custom Core|us-east4": "B355-C90F-1CBE",
+  "Cloud Memorystore for Memcached|Custom RAM M1|asia-southeast1": "6B29-FAC1-3566",
+  "Cloud Memorystore for Memcached|Custom RAM M2|asia-south1": "8E47-5513-7474",
+  "Cloud Memorystore for Memcached|Custom RAM M2|us-east4": "A625-7A57-DBFB",
+  "Cloud Memorystore for Memcached|Custom RAM|asia-south1": "06A1-3502-25CD",
+  "Cloud Memorystore for Memcached|Custom RAM|us-east4": "9F05-2E7D-1F7B",
+  "Cloud Memorystore for Redis|Redis Capacity Basic M1|asia-south1": "1A79-AA76-9403",
+  "Cloud Memorystore for Redis|Redis Capacity Basic M1|asia-southeast1": {
+    "resource_group": "Redis",
+    "sku_id": "D7B2-9EA7-8B11",
+    "unit": "GiBy.h"
+  },
+  "Cloud Memorystore for Redis|Redis Capacity Basic M1|us-central1": {
+    "resource_group": "Redis",
+    "sku_id": "38BC-F861-2EB5",
+    "unit": "GiBy.h"
+  },
+  "Cloud Memorystore for Redis|Redis Capacity Basic M1|us-east4": "692E-7E10-B811",
+  "Cloud Memorystore for Redis|Redis Capacity Basic M2|asia-south1": {
+    "resource_group": "Redis",
+    "sku_id": "C0DE-CBF3-DEE8",
+    "unit": "GiBy.h"
+  },
+  "Cloud Memorystore for Redis|Redis Capacity Basic M3|asia-south1": {
+    "resource_group": "Redis",
+    "sku_id": "A8E3-58B2-16A7",
+    "unit": "GiBy.h"
+  },
+  "Cloud Memorystore for Redis|Redis Capacity Basic M3|asia-south2": {
+    "resource_group": "Redis",
+    "sku_id": "F852-D6F3-A769",
+    "unit": "GiBy.h"
+  },
+  "Cloud Memorystore for Redis|Redis Capacity Basic M3|asia-southeast1": {
+    "resource_group": "Redis",
+    "sku_id": "E366-04FD-50BF",
+    "unit": "GiBy.h"
+  },
+  "Cloud Memorystore for Redis|Redis Capacity Basic M3|us-east4": "977A-919C-6D33",
+  "Cloud Memorystore for Redis|Redis Capacity Basic M5|asia-south1": {
+    "resource_group": "Redis",
+    "sku_id": "0B85-062F-82FF",
+    "unit": "GiBy.h"
+  },
+  "Cloud Memorystore for Redis|Redis Capacity Basic M5|asia-south2": {
+    "resource_group": "Redis",
+    "sku_id": "C062-9493-2F3C",
+    "unit": "GiBy.h"
+  },
+  "Cloud Memorystore for Redis|Redis Capacity Basic M5|asia-southeast1": {
+    "resource_group": "Redis",
+    "sku_id": "1400-53FD-4687",
+    "unit": "GiBy.h"
+  },
+  "Cloud Memorystore for Redis|Redis Capacity Basic M5|us-central1": {
+    "resource_group": "Redis",
+    "sku_id": "3840-99EF-A5FE",
+    "unit": "GiBy.h"
+  },
+  "Cloud Memorystore for Redis|Redis Capacity Basic M5|us-east4": {
+    "resource_group": "Redis",
+    "sku_id": "71FB-562A-2BD3",
+    "unit": "GiBy.h"
+  },
+  "Cloud Memorystore for Redis|Redis Capacity Standard M1|asia-south1": {
+    "resource_group": "Redis",
+    "sku_id": "E546-A818-9A77",
+    "unit": "GiBy.h"
+  },
+  "Cloud Memorystore for Redis|Redis Capacity Standard M1|us-central1": {
+    "resource_group": "Redis",
+    "sku_id": "6CC9-917B-40AB",
+    "unit": "GiBy.h"
+  },
+  "Cloud Memorystore for Redis|Redis Capacity Standard M1|us-east4": {
+    "resource_group": "Redis",
+    "sku_id": "C694-D170-3974",
+    "unit": "GiBy.h"
+  },
+  "Cloud Memorystore for Redis|Redis Capacity Standard M5|asia-south1": {
+    "resource_group": "Redis",
+    "sku_id": "88FA-7986-6593",
+    "unit": "GiBy.h"
+  },
+  "Cloud Memorystore for Redis|Redis Capacity Standard M5|us-central1": {
+    "resource_group": "Redis",
+    "sku_id": "B720-7822-FCC3",
+    "unit": "GiBy.h"
+  },
+  "Cloud Memorystore for Redis|Redis Capacity Standard M5|us-east4": {
+    "resource_group": "Redis",
+    "sku_id": "F7F9-E2C7-395E",
+    "unit": "GiBy.h"
+  },
+  "Cloud Memorystore for Redis|Redis\\ Capacity\\ Basic\\ M1|asia-south1": {
+    "resource_group": "Redis",
+    "sku_id": "1A79-AA76-9403",
+    "unit": "GiBy.h"
+  },
+  "Cloud Monitoring|Monitoring API Requests|asia-south1": "3ECE-36FE-BD9D",
+  "Cloud Monitoring|Monitoring API Requests|global": "3ECE-36FE-BD9D",
+  "Cloud Monitoring|Monitoring API Requests|us-east4": "3ECE-36FE-BD9D",
+  "Cloud Monitoring|Monitoring API Requests|us-west1": "3ECE-36FE-BD9D",
+  "Cloud Monitoring|Time series billed count|asia-south1": {
+    "resource_group": "Monitoring",
+    "sku_id": "6E35-67F5-C3C6",
+    "unit": "count"
+  },
+  "Cloud Monitoring|Time series billed count|us-east4": "6E35-67F5-C3C6",
+  "Cloud NAT|Cloud Nat Data Processing|asia-south1": {
+    "resource_group": "Nat",
+    "sku_id": "015F-5732-FFF0",
+    "unit": "GiBy"
+  },
+  "Cloud NAT|Cloud Nat Data Processing|asia-south2": {
+    "resource_group": "Nat",
+    "sku_id": "015F-5732-FFF0",
+    "unit": "GiBy"
+  },
+  "Cloud NAT|Cloud Nat Data Processing|global": {
+    "resource_group": "Nat",
+    "sku_id": "015F-5732-FFF0",
+    "unit": "GiBy"
+  },
+  "Cloud NAT|Private Nat Gateway Uptime|asia-south1": {
+    "resource_group": "Nat",
+    "sku_id": "AAF7-1D17-BFC4",
+    "unit": "h"
+  },
+  "Cloud NAT|Private Nat Gateway Uptime|asia-south2": {
+    "resource_group": "Nat",
+    "sku_id": "AAF7-1D17-BFC4",
+    "unit": "h"
+  },
+  "Cloud NAT|Private Nat Gateway Uptime|asia-southeast1": {
+    "resource_group": "Nat",
+    "sku_id": "AAF7-1D17-BFC4",
+    "unit": "h"
+  },
+  "Cloud NAT|Private Nat Gateway Uptime|australia-southeast1": {
+    "resource_group": "Nat",
+    "sku_id": "AAF7-1D17-BFC4",
+    "unit": "h"
+  },
+  "Cloud NAT|Private Nat Gateway Uptime|global": {
+    "resource_group": "Nat",
+    "sku_id": "AAF7-1D17-BFC4",
+    "unit": "h"
+  },
+  "Cloud Run Functions|Functions Invocations|asia-south1": "92DF-0F0E-630F",
+  "Cloud Run Functions|Functions Invocations|global": "92DF-0F0E-630F",
+  "Cloud Run Functions|Functions Invocations|us-east4": "92DF-0F0E-630F",
+  "Cloud Run Functions|Functions Invocations|us-west1": "92DF-0F0E-630F",
+  "Cloud Run Functions|functions CPU|asia-south1": "565D-710B-A24A",
+  "Cloud Run Functions|functions CPU|us-east4": "3E33-5F01-26B8",
+  "Cloud Run Functions|functions Memory|asia-south1": "D5CB-0E6B-D52F",
+  "Cloud Run Functions|functions Memory|us-east4": "3988-F2AF-8AD1",
+  "Cloud Run Functions|functions Memory|us-west1": "3A36-734F-970B",
+  "Cloud Run|Services CPU (Instance-based billing)|asia-south1": {
+    "catalog_version": "2026-07-27T06:50:51Z",
+    "resource_group": null,
+    "sku_id": null,
+    "unit": null
+  },
+  "Cloud Run|Services Memory (Instance-based billing)|asia-south1": {
+    "catalog_version": "2026-07-27T06:50:51Z",
+    "resource_group": null,
+    "sku_id": null,
+    "unit": null
+  },
+  "Cloud Run|Services\\ CPU\\ \\(Instance\\-based\\ billing\\)|asia-south1": {
+    "resource_group": "Compute",
+    "sku_id": "80A5-75E2-7BFC",
+    "unit": "s"
+  },
+  "Cloud Run|Services\\ Memory\\ \\(Instance\\-based\\ billing\\)|asia-south1": {
+    "resource_group": "Compute",
+    "sku_id": "A08D-D96A-CC99",
+    "unit": "GiBy.s"
+  },
+  "Cloud SQL|Backups|asia-south1": {
+    "resource_group": "PDSnapshot",
+    "sku_id": "D737-A9D2-80AB",
+    "unit": "GiBy.mo"
+  },
+  "Cloud SQL|Backups|asia-southeast1": "5C0F-D226-757F",
+  "Cloud SQL|Backups|global": {
+    "catalog_version": "2026-07-27T06:50:51Z",
+    "resource_group": null,
+    "sku_id": null,
+    "unit": null
+  },
+  "Cloud SQL|Cloud SQL for My SQL: Regional - Enterprise Plus Performance Optimized C4A vCPU|asia-southeast1": "77B6-C476-D97B",
+  "Cloud SQL|Cloud SQL for MySQL: Regional - Enterprise Plus C4A RAM|asia-southeast1": "1E71-653E-FB66",
+  "Cloud SQL|Cloud SQL for MySQL: Regional - RAM|asia-south1": "CF65-6199-3E00",
+  "Cloud SQL|Cloud SQL for MySQL: Regional - RAM|asia-southeast1": {
+    "resource_group": "SQLGen2InstancesRAM",
+    "sku_id": "B5A3-F8E0-E992",
+    "unit": "GiBy.h"
+  },
+  "Cloud SQL|Cloud SQL for MySQL: Regional - RAM|us-east4": "F7C7-06FE-F90B",
+  "Cloud SQL|Cloud SQL for MySQL: Regional - SSD storage|asia-south1": {
+    "catalog_version": "2026-07-27T06:50:51Z",
+    "resource_group": null,
+    "sku_id": null,
+    "unit": null
+  },
+  "Cloud SQL|Cloud SQL for MySQL: Regional - vCPU|asia-south1": "C6EC-0069-3076",
+  "Cloud SQL|Cloud SQL for MySQL: Regional - vCPU|asia-southeast1": {
+    "resource_group": "SQLGen2InstancesCPU",
+    "sku_id": "F61D-C80B-8895",
+    "unit": "h"
+  },
+  "Cloud SQL|Cloud SQL for MySQL: Regional - vCPU|us-east4": "0BDD-15E0-B4B5",
+  "Cloud SQL|Cloud SQL for MySQL: Zonal - RAM|asia-south1": "EAF1-CE88-2F23",
+  "Cloud SQL|Cloud SQL for MySQL: Zonal - RAM|asia-south2": {
+    "resource_group": "SQLGen2InstancesRAM",
+    "sku_id": "139D-E5A0-0DD3",
+    "unit": "GiBy.h"
+  },
+  "Cloud SQL|Cloud SQL for MySQL: Zonal - RAM|asia-southeast1": "646E-05DE-6331",
+  "Cloud SQL|Cloud SQL for MySQL: Zonal - RAM|us-east4": "2D52-9DDF-08CF",
+  "Cloud SQL|Cloud SQL for MySQL: Zonal - SSD storage|asia-south1": {
+    "catalog_version": "2026-07-27T06:50:51Z",
+    "resource_group": null,
+    "sku_id": null,
+    "unit": null
+  },
+  "Cloud SQL|Cloud SQL for MySQL: Zonal - vCPU|asia-south1": "FD1C-BF76-E3AA",
+  "Cloud SQL|Cloud SQL for MySQL: Zonal - vCPU|asia-south2": {
+    "resource_group": "SQLGen2InstancesCPU",
+    "sku_id": "CFC4-D36D-9829",
+    "unit": "h"
+  },
+  "Cloud SQL|Cloud SQL for MySQL: Zonal - vCPU|asia-southeast1": "3A8F-F454-6BF0",
+  "Cloud SQL|Cloud SQL for MySQL: Zonal - vCPU|us-east4": "C8B1-5501-F41B",
+  "Cloud SQL|Cloud SQL for PostgreSQL: Regional - RAM|asia-southeast1": {
+    "resource_group": "SQLGen2InstancesRAM",
+    "sku_id": "37B4-B2B7-C640",
+    "unit": "GiBy.h"
+  },
+  "Cloud SQL|Cloud SQL for PostgreSQL: Regional - RAM|us-east4": "1501-9589-4062",
+  "Cloud SQL|Cloud SQL for PostgreSQL: Regional - SSD storage|us-east4": {
+    "catalog_version": "2026-07-27T06:50:51Z",
+    "resource_group": null,
+    "sku_id": null,
+    "unit": null
+  },
+  "Cloud SQL|Cloud SQL for PostgreSQL: Regional - vCPU|asia-southeast1": {
+    "resource_group": "SQLGen2InstancesCPU",
+    "sku_id": "0152-2835-C929",
+    "unit": "h"
+  },
+  "Cloud SQL|Cloud SQL for PostgreSQL: Regional - vCPU|us-east4": "0154-7BAE-89A4",
+  "Cloud SQL|Cloud SQL for PostgreSQL: Zonal - Enterprise Plus C4A RAM|asia-southeast1": "CC67-BB20-EBC5",
+  "Cloud SQL|Cloud SQL for PostgreSQL: Zonal - RAM|asia-southeast1": "B5FB-A86D-93E5",
+  "Cloud SQL|Cloud SQL for PostgreSQL: Zonal - RAM|us-east4": "26FD-7344-3E99",
+  "Cloud SQL|Cloud SQL for PostgreSQL: Zonal - SSD storage|asia-south1": {
+    "catalog_version": "2026-07-27T06:50:51Z",
+    "resource_group": null,
+    "sku_id": null,
+    "unit": null
+  },
+  "Cloud SQL|Cloud SQL for PostgreSQL: Zonal - vCPU|asia-southeast1": "7CCB-32BC-7C57",
+  "Cloud SQL|Cloud SQL for PostgreSQL: Zonal - vCPU|us-east4": "99EA-F8FA-6640",
+  "Cloud SQL|Cloud SQL for Postgres: Zonal - Enterprise Plus Performance Optimized C4A vCPU|asia-southeast1": "3B94-D60C-9FA8",
+  "Cloud SQL|Cloud SQL.*Regional.*RAM|us-east4": "0DA8-5D33-46FB",
+  "Cloud SQL|Cloud SQL.*Regional.*vCPU|us-east4": "0154-7BAE-89A4",
+  "Cloud SQL|Cloud SQL.*Zonal.*RAM|us-east4": "0496-00FF-6973",
+  "Cloud SQL|Cloud SQL.*Zonal.*vCPU|us-east4": "0001-0118-796B",
+  "Cloud SQL|Cloud SQL: Regional - SSD storage|asia-south1": {
+    "catalog_version": "2026-07-27T06:50:51Z",
+    "resource_group": null,
+    "sku_id": null,
+    "unit": null
+  },
+  "Cloud SQL|Cloud SQL: Zonal - Backups|asia-south1": {
+    "catalog_version": "2026-07-27T06:50:51Z",
+    "resource_group": null,
+    "sku_id": null,
+    "unit": null
+  },
+  "Cloud SQL|Cloud\\ SQL\\ for\\ PostgreSQL:\\ Zonal\\ \\-\\ RAM|us-east4": {
+    "resource_group": "SQLGen2InstancesRAM",
+    "sku_id": "26FD-7344-3E99",
+    "unit": "GiBy.h"
+  },
+  "Cloud SQL|Cloud\\ SQL\\ for\\ PostgreSQL:\\ Zonal\\ \\-\\ vCPU|us-east4": {
+    "resource_group": "SQLGen2InstancesCPU",
+    "sku_id": "99EA-F8FA-6640",
+    "unit": "h"
+  },
+  "Cloud SQL|Extended support vCPU v13|us-east4": {
+    "resource_group": "SQLGen2InstancesCPU",
+    "sku_id": "0001-0118-796B",
+    "unit": "h"
+  },
+  "Cloud SQL|PostgreSQL:\\ Zonal\\ \\-\\ Extended\\ support\\ vCPU\\ v13|us-east4": {
+    "resource_group": "SQLGen2InstancesCPU",
+    "sku_id": "31D9-BCED-52C3",
+    "unit": "h"
+  },
+  "Cloud SQL|Zonal - 16 vCPU \\+ 104GB RAM|asia-south1": {
+    "resource_group": "SQLGen2InstancesN1Highmem",
+    "sku_id": "9A9C-CEFF-1092",
+    "unit": "h"
+  },
+  "Cloud SQL|Zonal - 2 vCPU \\+ 13GB RAM|asia-south1": {
+    "resource_group": "SQLGen2InstancesN1Highmem",
+    "sku_id": "DCB8-AC91-13B5",
+    "unit": "h"
+  },
+  "Cloud SQL|Zonal - 2 vCPU \\+ 7\\.5GB RAM|asia-south1": {
+    "resource_group": "SQLGen2InstancesN1Standard",
+    "sku_id": "F118-E881-B502",
+    "unit": "h"
+  },
+  "Cloud SQL|Zonal - 2 vCPU \\+ 7\\.5GB RAM|asia-south2": {
+    "resource_group": "SQLGen2InstancesN1Standard",
+    "sku_id": "833B-813B-EACC",
+    "unit": "h"
+  },
+  "Cloud SQL|Zonal - 4 vCPU \\+ 26GB RAM|asia-south1": {
+    "resource_group": "SQLGen2InstancesN1Highmem",
+    "sku_id": "5344-8A67-74FD",
+    "unit": "h"
+  },
+  "Cloud SQL|Zonal - 8 vCPU \\+ 52GB RAM|asia-south1": {
+    "resource_group": "SQLGen2InstancesN1Highmem",
+    "sku_id": "81FA-F884-92E6",
+    "unit": "h"
+  },
+  "Cloud SQL|Zonal - Enterprise Storage Hyperdisk Balanced IOPS|asia-southeast1": {
+    "resource_group": "SSD",
+    "sku_id": "00BD-395B-050D",
+    "unit": "mo"
+  },
+  "Cloud SQL|Zonal Extended support vCPU|us-east4": {
+    "catalog_version": "2026-07-27T06:50:51Z",
+    "resource_group": null,
+    "sku_id": null,
+    "unit": null
+  },
+  "Cloud SQL|^Cloud SQL for MySQL: Regional - Micro instance|asia-southeast1": "74EF-AB01-E663",
+  "Cloud SQL|^Cloud SQL for MySQL: Regional - Small instance|asia-southeast1": "EA56-779A-26B9",
+  "Cloud SQL|^Cloud SQL for MySQL: Zonal - Micro instance|asia-southeast1": "B229-77AF-9915",
+  "Cloud SQL|^Cloud SQL for MySQL: Zonal - Small instance|asia-southeast1": "96ED-706A-D9AF",
+  "Cloud SQL|^Cloud SQL for PostgreSQL: Regional - Micro instance|asia-southeast1": "4AFC-2508-125A",
+  "Cloud SQL|^Cloud SQL for PostgreSQL: Regional - Small instance|asia-southeast1": "E5B0-928E-2903",
+  "Cloud SQL|^Cloud SQL for PostgreSQL: Zonal - Micro instance|asia-southeast1": "A6CC-C943-2A4F",
+  "Cloud SQL|^Cloud SQL for PostgreSQL: Zonal - Small instance|asia-southeast1": "FB2B-BC59-824D",
+  "Cloud Storage|Archive Storage|asia-south1": {
+    "resource_group": "ArchiveStorage",
+    "sku_id": "891B-EBF4-A8DC",
+    "unit": "GiBy.mo"
+  },
+  "Cloud Storage|Archive Storage|us-east4": {
+    "resource_group": "ArchiveStorage",
+    "sku_id": "A386-C234-21D1",
+    "unit": "GiBy.mo"
+  },
+  "Cloud Storage|Autoclass Management Fee|asia-south1": "CF60-426C-8557",
+  "Cloud Storage|Autoclass Management Fee|asia-southeast1": "CF60-426C-8557",
+  "Cloud Storage|Coldline Storage|asia-south1": "81E6-58F6-12C7",
+  "Cloud Storage|Coldline Storage|asia-southeast1": "8E89-0AC8-66C0",
+  "Cloud Storage|Nearline Storage|asia-south1": "FD55-A8ED-B1A6",
+  "Cloud Storage|Nearline Storage|asia-southeast1": "4453-FEE4-941B",
+  "Cloud Storage|Regional Standard Class A Operations|asia-south1": {
+    "resource_group": "RegionalOps",
+    "sku_id": "4DBF-185F-A415",
+    "unit": "count"
+  },
+  "Cloud Storage|Regional Standard Class A Operations|asia-south2": {
+    "resource_group": "RegionalOps",
+    "sku_id": "4DBF-185F-A415",
+    "unit": "count"
+  },
+  "Cloud Storage|Regional Standard Class A Operations|global": {
+    "resource_group": "RegionalOps",
+    "sku_id": "4DBF-185F-A415",
+    "unit": "count"
+  },
+  "Cloud Storage|Regional Standard Class A Operations|us-east4": {
+    "resource_group": "RegionalOps",
+    "sku_id": "4DBF-185F-A415",
+    "unit": "count"
+  },
+  "Cloud Storage|Regional Standard Class B Operations|asia-south1": {
+    "resource_group": "RegionalOps",
+    "sku_id": "7870-010B-2763",
+    "unit": "count"
+  },
+  "Cloud Storage|Regional Standard Class B Operations|asia-south2": {
+    "resource_group": "RegionalOps",
+    "sku_id": "7870-010B-2763",
+    "unit": "count"
+  },
+  "Cloud Storage|Regional Standard Class B Operations|global": {
+    "resource_group": "RegionalOps",
+    "sku_id": "7870-010B-2763",
+    "unit": "count"
+  },
+  "Cloud Storage|Standard Storage|asia-south1": "2717-BEFE-3773",
+  "Cloud Storage|Standard Storage|asia-south2": {
+    "resource_group": "RegionalStorage",
+    "sku_id": "B219-7161-A1AF",
+    "unit": "GiBy.mo"
+  },
+  "Cloud Storage|Standard Storage|asia-southeast1": {
+    "resource_group": "RegionalStorage",
+    "sku_id": "76BA-5CAD-4338",
+    "unit": "GiBy.mo"
+  },
+  "Cloud Storage|Standard Storage|us-east1": {
+    "resource_group": "MultiRegionalStorage",
+    "sku_id": "1CAF-511D-F4EA",
+    "unit": "GiBy.mo"
+  },
+  "Cloud Storage|Standard Storage|us-east4": {
+    "resource_group": "RegionalStorage",
+    "sku_id": "5F7A-5173-CF5B",
+    "unit": "GiBy.mo"
+  },
+  "Cloud Storage|Standard Storage|us-west2": {
+    "resource_group": "RegionalStorage",
+    "sku_id": "A78B-6FCE-180E",
+    "unit": "GiBy.mo"
+  },
+  "Cloud Storage|Storage Intelligence Standard Object Management Fee|asia-south1": "F67F-9FAF-E4FB",
+  "Cloud Storage|Storage Intelligence Standard Object Management Fee|asia-southeast1": "F67F-9FAF-E4FB",
+  "Cloud VPN|Cloud VPN Tunnel|asia-south1": {
+    "resource_group": "VPNTunnel",
+    "sku_id": "930D-66FD-C691",
+    "unit": "h"
+  },
+  "Cloud VPN|Cloud VPN Tunnel|asia-south2": {
+    "resource_group": "VPNTunnel",
+    "sku_id": "22F4-96BD-E196",
+    "unit": "h"
+  },
+  "Cloud VPN|Cloud VPN Tunnel|global": {
+    "catalog_version": "2026-07-27T06:50:51Z",
+    "resource_group": null,
+    "sku_id": null,
+    "unit": null
+  },
+  "Cloud VPN|Cloud VPN Tunnel|us-east4": {
+    "resource_group": "VPNTunnel",
+    "sku_id": "9E78-D655-A277",
+    "unit": "h"
+  },
+  "Compute Engine|A2 Instance Core|asia-southeast1": {
+    "resource_group": "CPU",
+    "sku_id": "10F0-EE60-26C7",
+    "unit": "h"
+  },
+  "Compute Engine|A2 Instance Core|europe-west1": {
+    "resource_group": "CPU",
+    "sku_id": "833D-F28B-BCD2",
+    "unit": "h"
+  },
+  "Compute Engine|A2 Instance Core|us-east4": {
+    "resource_group": "CPU",
+    "sku_id": "5EF9-7776-45FD",
+    "unit": "h"
+  },
+  "Compute Engine|A2 Instance Ram|asia-southeast1": {
+    "resource_group": "RAM",
+    "sku_id": "03D0-B47F-1938",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|A2 Instance Ram|europe-west1": {
+    "resource_group": "RAM",
+    "sku_id": "933C-9C81-5D7F",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|A2 Instance Ram|us-east4": {
+    "resource_group": "RAM",
+    "sku_id": "A592-E65A-C71A",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|A3 Instance Core|us-east4": {
+    "resource_group": "CPU",
+    "sku_id": "85AE-011B-9E94",
+    "unit": "h"
+  },
+  "Compute Engine|A3 Instance Ram|us-east4": {
+    "resource_group": "RAM",
+    "sku_id": "6D9E-EE3E-E1ED",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|Balanced PD Capacity|asia-northeast1": "6D8C-DF09-314D",
+  "Compute Engine|Balanced PD Capacity|asia-south1": {
+    "resource_group": "SSD",
+    "sku_id": "C24C-88D9-75ED",
+    "unit": "GiBy.mo"
+  },
+  "Compute Engine|Balanced PD Capacity|asia-south2": {
+    "resource_group": "SSD",
+    "sku_id": "E709-23E2-DCD9",
+    "unit": "GiBy.mo"
+  },
+  "Compute Engine|Balanced PD Capacity|asia-southeast1": "16D2-FC49-A127",
+  "Compute Engine|Balanced PD Capacity|us-east1": {
+    "resource_group": "SSD",
+    "sku_id": "6AE1-525F-8B80",
+    "unit": "GiBy.mo"
+  },
+  "Compute Engine|Balanced PD Capacity|us-east4": "7D52-6D58-14FF",
+  "Compute Engine|C2D AMD Instance Core|asia-south1": {
+    "resource_group": "CPU",
+    "sku_id": "406A-AA4B-1013",
+    "unit": "h"
+  },
+  "Compute Engine|C2D AMD Instance Core|asia-southeast1": {
+    "resource_group": "CPU",
+    "sku_id": "A8BB-FA67-F9D8",
+    "unit": "h"
+  },
+  "Compute Engine|C2D AMD Instance Ram|asia-south1": {
+    "resource_group": "RAM",
+    "sku_id": "BD36-0399-11EF",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|C2D AMD Instance Ram|asia-southeast1": {
+    "resource_group": "RAM",
+    "sku_id": "6E53-DF71-F575",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|C3 Instance Core|asia-south1": "1B93-073E-DFE5",
+  "Compute Engine|C3 Instance Core|asia-southeast1": "A86D-6AED-033D",
+  "Compute Engine|C3 Instance Core|europe-west1": {
+    "resource_group": "CPU",
+    "sku_id": "954C-E70D-82FA",
+    "unit": "h"
+  },
+  "Compute Engine|C3 Instance Core|us-east4": "3788-1D54-5064",
+  "Compute Engine|C3 Instance Ram|asia-south1": "61A0-38AE-BC2D",
+  "Compute Engine|C3 Instance Ram|asia-southeast1": "2993-DABE-6694",
+  "Compute Engine|C3 Instance Ram|europe-west1": {
+    "resource_group": "RAM",
+    "sku_id": "6366-A06C-112A",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|C3 Instance Ram|us-east4": "79FF-8713-9940",
+  "Compute Engine|C3D Instance Core|asia-south1": {
+    "resource_group": "CPU",
+    "sku_id": "EE26-575A-FC62",
+    "unit": "h"
+  },
+  "Compute Engine|C3D Instance Core|asia-south2": {
+    "resource_group": "CPU",
+    "sku_id": "05B0-1D39-C97B",
+    "unit": "h"
+  },
+  "Compute Engine|C3D Instance Core|asia-southeast1": "1102-0B94-379D",
+  "Compute Engine|C3D Instance Core|europe-west1": {
+    "resource_group": "CPU",
+    "sku_id": "6705-5025-AB92",
+    "unit": "h"
+  },
+  "Compute Engine|C3D Instance Core|us-east4": {
+    "resource_group": "CPU",
+    "sku_id": "299E-E8A6-3B63",
+    "unit": "h"
+  },
+  "Compute Engine|C3D Instance Ram|asia-south1": "768F-D051-26AD",
+  "Compute Engine|C3D Instance Ram|asia-south2": {
+    "resource_group": "RAM",
+    "sku_id": "C965-F24F-2036",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|C3D Instance Ram|asia-southeast1": "FF0E-72DF-B5C5",
+  "Compute Engine|C3D Instance Ram|europe-west1": {
+    "resource_group": "RAM",
+    "sku_id": "EA79-23AA-4001",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|C3D Instance Ram|us-east4": {
+    "resource_group": "RAM",
+    "sku_id": "4AB8-DEB2-DD17",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|C4A Arm Instance Core|asia-south1": "5E4E-361B-0679",
+  "Compute Engine|C4A Arm Instance Core|asia-southeast1": {
+    "resource_group": "CPU",
+    "sku_id": "E9F9-1A71-F977",
+    "unit": "h"
+  },
+  "Compute Engine|C4A Arm Instance Core|europe-west1": {
+    "resource_group": "CPU",
+    "sku_id": "8E7B-F1D6-A69D",
+    "unit": "h"
+  },
+  "Compute Engine|C4A Arm Instance Core|us-east4": "DB0A-BB89-21CE",
+  "Compute Engine|C4A Arm Instance Ram|asia-south1": "4B92-38BB-4304",
+  "Compute Engine|C4A Arm Instance Ram|asia-southeast1": {
+    "resource_group": "RAM",
+    "sku_id": "C126-12BB-C123",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|C4A Arm Instance Ram|europe-west1": {
+    "resource_group": "RAM",
+    "sku_id": "1B7E-28B4-8940",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|C4A Arm Instance Ram|us-east4": "DF18-20EB-3CBA",
+  "Compute Engine|Cloud Interconnect - 10Gbps Dedicated circuit|us-east4": {
+    "resource_group": "InterconnectPort",
+    "sku_id": "B8C8-2F76-E648",
+    "unit": "h"
+  },
+  "Compute Engine|E2 Instance Core|N2D AMD Instance Core|asia-southeast1": {
+    "resource_group": "CPU",
+    "sku_id": "7102-B9AA-2ACF",
+    "unit": "h"
+  },
+  "Compute Engine|E2 Instance Core|asia-south1": "DFC1-04D4-B4A1",
+  "Compute Engine|E2 Instance Core|asia-south2": {
+    "resource_group": "CPU",
+    "sku_id": "210D-FDFA-448C",
+    "unit": "h"
+  },
+  "Compute Engine|E2 Instance Core|asia-southeast1": "7102-B9AA-2ACF",
+  "Compute Engine|E2 Instance Core|australia-southeast1": {
+    "resource_group": "CPU",
+    "sku_id": "9819-4AB8-1A87",
+    "unit": "h"
+  },
+  "Compute Engine|E2 Instance Core|europe-west1": {
+    "resource_group": "CPU",
+    "sku_id": "9FE0-8F60-A9F0",
+    "unit": "h"
+  },
+  "Compute Engine|E2 Instance Core|us-east4": "D5C5-E209-22D3",
+  "Compute Engine|E2 Instance Ram|N2D AMD Instance Ram|asia-southeast1": {
+    "resource_group": "RAM",
+    "sku_id": "92EB-71EA-DA74",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|E2 Instance Ram|asia-south1": "90AB-A7A8-F873",
+  "Compute Engine|E2 Instance Ram|asia-south2": {
+    "resource_group": "RAM",
+    "sku_id": "0B33-C7D0-C5A9",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|E2 Instance Ram|asia-southeast1": "E277-7DC2-2C7D",
+  "Compute Engine|E2 Instance Ram|australia-southeast1": {
+    "resource_group": "RAM",
+    "sku_id": "F9E1-E6EF-86F3",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|E2 Instance Ram|europe-west1": {
+    "resource_group": "RAM",
+    "sku_id": "F268-6CE7-AC16",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|E2 Instance Ram|us-east4": "6D24-3682-D284",
+  "Compute Engine|External IP Charge on a Standard VM|": "C054-7F72-A02E",
+  "Compute Engine|External IP Charge on a Standard VM|asia-south1": "C054-7F72-A02E",
+  "Compute Engine|External IP Charge on a Standard VM|asia-southeast1": "C054-7F72-A02E",
+  "Compute Engine|External IP Charge on a Standard VM|europe-west1": "C054-7F72-A02E",
+  "Compute Engine|External IP Charge on a Standard VM|global": "C054-7F72-A02E",
+  "Compute Engine|External IP Charge on a Standard VM|us-east4": "C054-7F72-A02E",
+  "Compute Engine|Extreme PD Capacity|asia-southeast1": "CDB7-FDDC-E5A6",
+  "Compute Engine|Extreme PD IOPS|asia-south1": {
+    "resource_group": "SSD",
+    "sku_id": "011B-2D29-8EE6",
+    "unit": "mo"
+  },
+  "Compute Engine|Extreme PD IOPS|asia-southeast1": "E97A-3CDB-37DD",
+  "Compute Engine|Extreme PD IOPS|us-east4": "7D3D-03D2-A977",
+  "Compute Engine|G2 Instance Core|asia-south1": {
+    "resource_group": "CPU",
+    "sku_id": "A6EC-9503-C0CD",
+    "unit": "h"
+  },
+  "Compute Engine|G2 Instance Core|asia-southeast1": {
+    "resource_group": "CPU",
+    "sku_id": "B5E8-8750-8D07",
+    "unit": "h"
+  },
+  "Compute Engine|G2 Instance Core|europe-west1": {
+    "resource_group": "CPU",
+    "sku_id": "672F-A750-21FA",
+    "unit": "h"
+  },
+  "Compute Engine|G2 Instance Core|us-east4": {
+    "resource_group": "CPU",
+    "sku_id": "CF07-A027-C390",
+    "unit": "h"
+  },
+  "Compute Engine|G2 Instance Ram|asia-south1": {
+    "resource_group": "RAM",
+    "sku_id": "5C70-9568-3192",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|G2 Instance Ram|asia-southeast1": {
+    "resource_group": "RAM",
+    "sku_id": "1930-29C0-2AFB",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|G2 Instance Ram|europe-west1": {
+    "resource_group": "RAM",
+    "sku_id": "FFD6-3A1B-6DD8",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|G2 Instance Ram|us-east4": {
+    "resource_group": "RAM",
+    "sku_id": "A15F-B56F-97FE",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|Hyperdisk Balanced IOPS|asia-south1": {
+    "resource_group": "SSD",
+    "sku_id": "519B-E9DD-3AF5",
+    "unit": "mo"
+  },
+  "Compute Engine|Hyperdisk Balanced IOPS|asia-south2": {
+    "resource_group": "SSD",
+    "sku_id": "403C-748E-A6F1",
+    "unit": "mo"
+  },
+  "Compute Engine|Hyperdisk Balanced IOPS|asia-southeast1": {
+    "resource_group": "SSD",
+    "sku_id": "5D64-B6D5-B6E8",
+    "unit": "mo"
+  },
+  "Compute Engine|Hyperdisk Balanced IOPS|us-east4": {
+    "resource_group": "SSD",
+    "sku_id": "3D96-85C5-6EB8",
+    "unit": "mo"
+  },
+  "Compute Engine|Licensing Fee for Windows Server version 1809 Datacenter Edition \\(CPU cost\\)|global": "6AE7-6CBB-DE7E",
+  "Compute Engine|Local SSD Capacity|asia-south1": {
+    "catalog_version": "2026-07-27T06:50:51Z",
+    "resource_group": null,
+    "sku_id": null,
+    "unit": null
+  },
+  "Compute Engine|M3 Memory-optimized Instance Core|asia-south1": "DAC5-4645-999C",
+  "Compute Engine|M3 Memory-optimized Instance Ram|asia-south1": "FCC3-050A-255F",
+  "Compute Engine|N1 Predefined Instance Core|asia-south1": {
+    "resource_group": "N1Standard",
+    "sku_id": "75BE-4FB0-E4E8",
+    "unit": "h"
+  },
+  "Compute Engine|N1 Predefined Instance Core|europe-west1": {
+    "resource_group": "N1Standard",
+    "sku_id": "9431-52B1-2C4F",
+    "unit": "h"
+  },
+  "Compute Engine|N1 Predefined Instance Core|us-east4": {
+    "resource_group": "N1Standard",
+    "sku_id": "2026-872A-3AB3",
+    "unit": "h"
+  },
+  "Compute Engine|N1 Predefined Instance Ram|asia-south1": {
+    "resource_group": "N1Standard",
+    "sku_id": "5736-3E10-2B21",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|N1 Predefined Instance Ram|europe-west1": {
+    "resource_group": "N1Standard",
+    "sku_id": "39F4-0112-6F39",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|N1 Predefined Instance Ram|us-east4": {
+    "resource_group": "N1Standard",
+    "sku_id": "6E2A-DCD9-87ED",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|N2 Custom Instance Core|asia-south1": "B427-FD14-9876",
+  "Compute Engine|N2 Custom Instance Core|asia-southeast1": {
+    "resource_group": "CPU",
+    "sku_id": "A0A6-F9E8-C0C2",
+    "unit": "h"
+  },
+  "Compute Engine|N2 Custom Instance Core|europe-west1": {
+    "resource_group": "CPU",
+    "sku_id": "0976-7487-062C",
+    "unit": "h"
+  },
+  "Compute Engine|N2 Custom Instance Core|us-east4": "0B2D-BDE1-6668",
+  "Compute Engine|N2 Custom Instance Ram|asia-south1": "643D-AE0D-2051",
+  "Compute Engine|N2 Custom Instance Ram|asia-southeast1": {
+    "resource_group": "RAM",
+    "sku_id": "1F19-9175-5B89",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|N2 Custom Instance Ram|europe-west1": {
+    "resource_group": "RAM",
+    "sku_id": "CA5F-A13B-29EA",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|N2 Custom Instance Ram|us-east4": "3552-7924-04CD",
+  "Compute Engine|N2 Instance Core|asia-south1": "3A1A-7CFC-5747",
+  "Compute Engine|N2 Instance Core|asia-south2": {
+    "resource_group": "CPU",
+    "sku_id": "73EE-1419-7501",
+    "unit": "h"
+  },
+  "Compute Engine|N2 Instance Core|asia-southeast1": "2514-CA24-299A",
+  "Compute Engine|N2 Instance Core|us-east4": "5571-8F21-9137",
+  "Compute Engine|N2 Instance Ram|asia-south1": "23FA-BF9A-7C7A",
+  "Compute Engine|N2 Instance Ram|asia-southeast1": "C84B-1AD4-8EAE",
+  "Compute Engine|N2 Instance Ram|us-east4": "A96B-6699-99E0",
+  "Compute Engine|N2D AMD Custom Instance Core|asia-south1": "665E-E4CD-1D74",
+  "Compute Engine|N2D AMD Custom Instance Core|asia-southeast1": {
+    "resource_group": "CPU",
+    "sku_id": "263D-00EF-EB69",
+    "unit": "h"
+  },
+  "Compute Engine|N2D AMD Custom Instance Core|us-east4": "115C-7108-8B9E",
+  "Compute Engine|N2D AMD Custom Instance Ram|asia-south1": "60E6-333B-57BE",
+  "Compute Engine|N2D AMD Custom Instance Ram|asia-southeast1": {
+    "resource_group": "RAM",
+    "sku_id": "4CBB-9DAF-2D6E",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|N2D AMD Custom Instance Ram|us-east4": "5719-5C5A-9EAB",
+  "Compute Engine|N2D AMD Instance Core|asia-south1": {
+    "resource_group": "CPU",
+    "sku_id": "0DAC-F520-B2D1",
+    "unit": "h"
+  },
+  "Compute Engine|N2D AMD Instance Core|asia-south2": {
+    "resource_group": "CPU",
+    "sku_id": "4289-2AC4-32AE",
+    "unit": "h"
+  },
+  "Compute Engine|N2D AMD Instance Core|asia-southeast1": "8B4E-B458-AD51",
+  "Compute Engine|N2D AMD Instance Core|europe-west1": {
+    "resource_group": "CPU",
+    "sku_id": "9201-F0D0-15DA",
+    "unit": "h"
+  },
+  "Compute Engine|N2D AMD Instance Ram|asia-south1": {
+    "resource_group": "RAM",
+    "sku_id": "E021-0FE4-1AC3",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|N2D AMD Instance Ram|asia-south2": {
+    "resource_group": "RAM",
+    "sku_id": "C8D0-536C-DF7C",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|N2D AMD Instance Ram|asia-southeast1": "92EB-71EA-DA74",
+  "Compute Engine|N2D AMD Instance Ram|europe-west1": {
+    "resource_group": "RAM",
+    "sku_id": "0A3A-4D14-E11B",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|N4 Instance Core|asia-south1": "CA44-0E73-787F",
+  "Compute Engine|N4 Instance Core|asia-southeast1": "DFAF-9D8F-2A48",
+  "Compute Engine|N4 Instance Core|europe-west1": {
+    "resource_group": "CPU",
+    "sku_id": "79CA-B6A3-8BA7",
+    "unit": "h"
+  },
+  "Compute Engine|N4 Instance Core|us-east4": "AADA-E54F-BAFB",
+  "Compute Engine|N4 Instance Ram|asia-south1": "510B-D0B4-2215",
+  "Compute Engine|N4 Instance Ram|asia-southeast1": "1F92-9CD1-0C58",
+  "Compute Engine|N4 Instance Ram|europe-west1": {
+    "resource_group": "RAM",
+    "sku_id": "6828-A0F1-21CC",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|N4 Instance Ram|us-east4": "E5C6-1036-C19C",
+  "Compute Engine|N4D Instance Core|asia-south1": {
+    "resource_group": "CPU",
+    "sku_id": "6012-F89D-8D34",
+    "unit": "h"
+  },
+  "Compute Engine|N4D Instance Core|us-east4": {
+    "resource_group": "CPU",
+    "sku_id": "6EC5-3DFC-D9F7",
+    "unit": "h"
+  },
+  "Compute Engine|N4D Instance Ram|asia-south1": {
+    "resource_group": "RAM",
+    "sku_id": "6790-7B52-0DC1",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|N4D Instance Ram|us-east4": {
+    "resource_group": "RAM",
+    "sku_id": "D18D-E803-7FB5",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|Nvidia H100 80GB GPU|asia-southeast1": {
+    "resource_group": "GPU",
+    "sku_id": "0148-BB07-E78B",
+    "unit": "h"
+  },
+  "Compute Engine|Nvidia H100 80GB GPU|us-east4": {
+    "resource_group": "GPU",
+    "sku_id": "0B85-B65B-0812",
+    "unit": "h"
+  },
+  "Compute Engine|Nvidia L4 GPU running in|asia-southeast1": {
+    "resource_group": "GPU",
+    "sku_id": "0117-733F-6A96",
+    "unit": "h"
+  },
+  "Compute Engine|Nvidia L4 GPU running in|europe-west1": {
+    "resource_group": "GPU",
+    "sku_id": "4A4C-5C8F-A6AB",
+    "unit": "h"
+  },
+  "Compute Engine|Nvidia L4 GPU running in|us-east4": {
+    "resource_group": "GPU",
+    "sku_id": "1D4C-3419-0297",
+    "unit": "h"
+  },
+  "Compute Engine|Nvidia Tesla A100 GPU running in|asia-southeast1": {
+    "resource_group": "GPU",
+    "sku_id": "3C9B-9F2F-F8F4",
+    "unit": "h"
+  },
+  "Compute Engine|Nvidia Tesla A100 GPU running in|europe-west1": {
+    "resource_group": "GPU",
+    "sku_id": "50D9-B0E2-1064",
+    "unit": "h"
+  },
+  "Compute Engine|Nvidia Tesla A100 GPU running in|us-east4": {
+    "resource_group": "GPU",
+    "sku_id": "11A1-17CA-448D",
+    "unit": "h"
+  },
+  "Compute Engine|Nvidia Tesla T4 GPU running in|asia-southeast1": {
+    "resource_group": "GPU",
+    "sku_id": "2ED5-9DA9-AFA6",
+    "unit": "h"
+  },
+  "Compute Engine|Nvidia Tesla T4 GPU running in|europe-west1": {
+    "resource_group": "GPU",
+    "sku_id": "6FAF-ADE7-FB07",
+    "unit": "h"
+  },
+  "Compute Engine|Nvidia Tesla T4 GPU running in|us-east4": {
+    "resource_group": "GPU",
+    "sku_id": "8D8D-649C-0D7F",
+    "unit": "h"
+  },
+  "Compute Engine|Red Hat Enterprise Linux 9 on VM with up to 8 VCPU|asia-south1": {
+    "resource_group": "Google",
+    "sku_id": "C66A-E29C-A0D0",
+    "unit": "h"
+  },
+  "Compute Engine|Red Hat Enterprise Linux 9 on VM with up to 8 VCPU|us-central1": {
+    "resource_group": "Google",
+    "sku_id": "C66A-E29C-A0D0",
+    "unit": "h"
+  },
+  "Compute Engine|Red Hat Enterprise Linux 9 on VM with up to 8 VCPU|us-east4": {
+    "resource_group": "Google",
+    "sku_id": "C66A-E29C-A0D0",
+    "unit": "h"
+  },
+  "Compute Engine|SSD backed Local Storage|asia-southeast1": {
+    "resource_group": "LocalSSD",
+    "sku_id": "18D2-F254-69B8",
+    "unit": "GiBy.mo"
+  },
+  "Compute Engine|SSD backed Local Storage|europe-west1": {
+    "resource_group": "LocalSSD",
+    "sku_id": "4B42-FAA2-A346",
+    "unit": "GiBy.mo"
+  },
+  "Compute Engine|SSD backed Local Storage|us-east4": {
+    "resource_group": "LocalSSD",
+    "sku_id": "1B8A-BA6B-7FB6",
+    "unit": "GiBy.mo"
+  },
+  "Compute Engine|Spot Preemptible N2D AMD Instance Core|asia-southeast1": "48EB-F1F3-223B",
+  "Compute Engine|Spot Preemptible N2D AMD Instance Ram|asia-southeast1": "47EB-17A0-C7B4",
+  "Compute Engine|Storage PD Capacity|asia-south1": "320C-7688-1A62",
+  "Compute Engine|Storage PD Capacity|asia-southeast1": "0572-568A-4FC4",
+  "Compute Engine|Storage PD Capacity|us-east4": "8AF1-1146-E7DA",
+  "Compute Engine|Storage PD Snapshot|asia-south1": "A0EA-3B8B-0794",
+  "Compute Engine|Storage PD Snapshot|asia-south2": {
+    "resource_group": "PDSnapshot",
+    "sku_id": "246B-6075-A49D",
+    "unit": "GiBy.mo"
+  },
+  "Compute Engine|Storage PD Snapshot|asia-southeast1": {
+    "resource_group": "PDSnapshot",
+    "sku_id": "EC5A-D05B-E188",
+    "unit": "GiBy.mo"
+  },
+  "Compute Engine|Storage PD Snapshot|us-east4": {
+    "resource_group": "PDSnapshot",
+    "sku_id": "3FB1-991D-37F5",
+    "unit": "GiBy.mo"
+  },
+  "Compute Engine|T2A Arm Instance Core|asia-south1": {
+    "resource_group": "CPU",
+    "sku_id": "21FA-D397-3735",
+    "unit": "h"
+  },
+  "Compute Engine|T2A Arm Instance Core|asia-southeast1": "21FA-D397-3735",
+  "Compute Engine|T2A Arm Instance Core|us-central1": "7F42-2C35-6872",
+  "Compute Engine|T2A Arm Instance Ram|asia-south1": {
+    "resource_group": "RAM",
+    "sku_id": "761E-277E-41F6",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|T2A Arm Instance Ram|asia-southeast1": "761E-277E-41F6",
+  "Compute Engine|T2D AMD Instance Core|asia-south1": "7B25-FFC2-42EE",
+  "Compute Engine|T2D AMD Instance Ram|asia-south1": {
+    "resource_group": "RAM",
+    "sku_id": "229C-8FDA-854F",
+    "unit": "GiBy.h"
+  },
+  "Compute Engine|Windows Server.*Datacenter Edition.*CPU cost|global": "00B2-37B0-B8BB",
+  "Compute Engine|Zonal Extended support vCPU|us-east4": {
+    "catalog_version": "2026-07-27T06:50:51Z",
+    "resource_group": null,
+    "sku_id": null,
+    "unit": null
+  },
+  "Compute Engine|^Nvidia\\s+(?:Tesla\\s+)?A100\\s+80GB\\s+GPU\\b|us-east4": {
+    "resource_group": "GPU",
+    "sku_id": "70A0-6026-94AD",
+    "unit": "h"
+  },
+  "Compute Engine|^Nvidia\\s+(?:Tesla\\s+)?A100\\s+GPU\\b|us-east4": {
+    "resource_group": "GPU",
+    "sku_id": "55CD-B842-ABA8",
+    "unit": "h"
+  },
+  "Compute Engine|^Nvidia\\s+(?:Tesla\\s+)?H100\\s+80GB\\s+GPU\\b|us-east4": {
+    "resource_group": "GPU",
+    "sku_id": "0B85-B65B-0812",
+    "unit": "h"
+  },
+  "Compute Engine|^Nvidia\\s+(?:Tesla\\s+)?L4\\s+GPU\\b|asia-south1": {
+    "resource_group": "GPU",
+    "sku_id": "AE59-12DA-20E3",
+    "unit": "h"
+  },
+  "Compute Engine|^Nvidia\\s+(?:Tesla\\s+)?L4\\s+GPU\\b|us-east4": {
+    "resource_group": "GPU",
+    "sku_id": "1D4C-3419-0297",
+    "unit": "h"
+  },
+  "Compute Engine|^Nvidia\\s+(?:Tesla\\s+)?T4\\s+GPU\\b|asia-south1": {
+    "resource_group": "GPU",
+    "sku_id": "4172-4910-76F5",
+    "unit": "h"
+  },
+  "Compute Engine|^Nvidia\\s+(?:Tesla\\s+)?T4\\s+GPU\\b|us-east4": {
+    "resource_group": "GPU",
+    "sku_id": "8D8D-649C-0D7F",
+    "unit": "h"
+  },
+  "Kubernetes Engine|Autopilot Pod Memory Requests|asia-south1": {
+    "resource_group": "Kubernetes",
+    "sku_id": "20E1-F7C1-FAC7",
+    "unit": "GiBy.h"
+  },
+  "Kubernetes Engine|Autopilot Pod Memory Requests|asia-south2": {
+    "resource_group": "Kubernetes",
+    "sku_id": "C2B9-D902-E0C5",
+    "unit": "GiBy.h"
+  },
+  "Kubernetes Engine|Autopilot Pod Memory Requests|asia-southeast1": {
+    "resource_group": "Kubernetes",
+    "sku_id": "6500-7637-6ACA",
+    "unit": "GiBy.h"
+  },
+  "Kubernetes Engine|Autopilot Pod Memory Requests|us-east4": {
+    "resource_group": "Kubernetes",
+    "sku_id": "7BEB-3570-8DDC",
+    "unit": "GiBy.h"
+  },
+  "Kubernetes Engine|Autopilot Pod mCPU Requests|asia-south1": {
+    "resource_group": "Kubernetes",
+    "sku_id": "4A90-D02B-3BAC",
+    "unit": "h"
+  },
+  "Kubernetes Engine|Autopilot Pod mCPU Requests|asia-south2": {
+    "resource_group": "Kubernetes",
+    "sku_id": "A3C4-AD92-C9EB",
+    "unit": "h"
+  },
+  "Kubernetes Engine|Autopilot Pod mCPU Requests|asia-southeast1": {
+    "resource_group": "Kubernetes",
+    "sku_id": "589B-F840-EC19",
+    "unit": "h"
+  },
+  "Kubernetes Engine|Autopilot Pod mCPU Requests|us-east4": {
+    "resource_group": "Kubernetes",
+    "sku_id": "FF6D-4C4F-A876",
+    "unit": "h"
+  },
+  "Kubernetes Engine|Regional Kubernetes Clusters|us-east1": {
+    "resource_group": "Kubernetes",
+    "sku_id": "B561-BFBD-1264",
+    "unit": "h"
+  },
+  "Kubernetes Engine|Zonal Kubernetes Clusters|asia-south1": {
+    "resource_group": "Kubernetes",
+    "sku_id": "6B92-A835-08AB",
+    "unit": "h"
+  },
+  "Kubernetes Engine|Zonal Kubernetes Clusters|asia-south2": {
+    "resource_group": "Kubernetes",
+    "sku_id": "6B92-A835-08AB",
+    "unit": "h"
+  },
+  "Kubernetes Engine|Zonal Kubernetes Clusters|global": {
+    "resource_group": "Kubernetes",
+    "sku_id": "6B92-A835-08AB",
+    "unit": "h"
+  },
+  "Kubernetes Engine|Zonal Kubernetes Clusters|us-east1": {
+    "resource_group": "Kubernetes",
+    "sku_id": "6B92-A835-08AB",
+    "unit": "h"
+  },
+  "Kubernetes Engine|Zonal Kubernetes Clusters|us-east4": {
+    "resource_group": "Kubernetes",
+    "sku_id": "6B92-A835-08AB",
+    "unit": "h"
+  },
+  "Networking|Cloud Nat Data Processing|asia-south1": "015F-5732-FFF0",
+  "Networking|Cloud Nat Data Processing|asia-south2": {
+    "resource_group": "Nat",
+    "sku_id": "015F-5732-FFF0",
+    "unit": "GiBy"
+  },
+  "Networking|Cloud Nat Data Processing|asia-southeast1": {
+    "resource_group": "Network",
+    "sku_id": "015F-5732-FFF0",
+    "unit": "GiBy"
+  },
+  "Networking|Cloud Nat Data Processing|global": "015F-5732-FFF0",
+  "Networking|Cloud Nat Data Processing|us-east4": "015F-5732-FFF0",
+  "Networking|Cloud Nat Gateway Uptime|asia-south1": "32E2-4EFC-EF9F",
+  "Networking|Cloud Nat Gateway Uptime|asia-south2": {
+    "resource_group": "Nat",
+    "sku_id": "32E2-4EFC-EF9F",
+    "unit": "h"
+  },
+  "Networking|Cloud Nat Gateway Uptime|asia-southeast1": {
+    "resource_group": "Network",
+    "sku_id": "32E2-4EFC-EF9F",
+    "unit": "h"
+  },
+  "Networking|Cloud Nat Gateway Uptime|australia-southeast1": {
+    "resource_group": "Nat",
+    "sku_id": "32E2-4EFC-EF9F",
+    "unit": "h"
+  },
+  "Networking|Cloud Nat Gateway Uptime|global": "32E2-4EFC-EF9F",
+  "Networking|Cloud Nat Gateway Uptime|us-east4": "32E2-4EFC-EF9F",
+  "Networking|Cloud VPN Tunnel|asia-south1": "930D-66FD-C691",
+  "Networking|Cloud VPN Tunnel|asia-south2": {
+    "resource_group": "VPNTunnel",
+    "sku_id": "22F4-96BD-E196",
+    "unit": "h"
+  },
+  "Networking|Cloud VPN Tunnel|australia-southeast1": {
+    "resource_group": "VPNTunnel",
+    "sku_id": "5D7C-F23B-9E79",
+    "unit": "h"
+  },
+  "Networking|Cloud VPN Tunnel|us-east4": "9E78-D655-A277",
+  "Networking|Network Connectivity Center Spoke Hours VPC Network Spoke|asia-south1": "4543-3174-7752",
+  "Networking|Network Connectivity Center Spoke Hours VPC Network Spoke|global": "4543-3174-7752",
+  "Networking|Network Connectivity Center Spoke Hours VPC Network Spoke|us-east4": "4543-3174-7752",
+  "Networking|Network Load Balancer Forwarding Rule Minimum|asia-south1": {
+    "resource_group": "LoadBalancing",
+    "sku_id": "3C77-E5DA-B2A0",
+    "unit": "h"
+  },
+  "Networking|Network Load Balancer Forwarding Rule Minimum|australia-southeast1": {
+    "resource_group": "LoadBalancing",
+    "sku_id": "21C5-3B8F-E1C5",
+    "unit": "h"
+  },
+  "Networking|Private Nat Gateway Uptime|asia-south1": {
+    "resource_group": "Nat",
+    "sku_id": "AAF7-1D17-BFC4",
+    "unit": "h"
+  },
+  "Networking|Private Nat Gateway Uptime|asia-south2": {
+    "resource_group": "Nat",
+    "sku_id": "AAF7-1D17-BFC4",
+    "unit": "h"
+  },
+  "Networking|Private Nat Gateway Uptime|asia-southeast1": {
+    "resource_group": "Nat",
+    "sku_id": "AAF7-1D17-BFC4",
+    "unit": "h"
+  },
+  "Networking|Private Nat Gateway Uptime|australia-southeast1": {
+    "resource_group": "Nat",
+    "sku_id": "AAF7-1D17-BFC4",
+    "unit": "h"
+  },
+  "Networking|Private Nat Gateway Uptime|global": {
+    "resource_group": "Nat",
+    "sku_id": "AAF7-1D17-BFC4",
+    "unit": "h"
+  },
+  "Networking|Private Nat Gateway Uptime|us-east1": {
+    "resource_group": "Nat",
+    "sku_id": "AAF7-1D17-BFC4",
+    "unit": "h"
+  },
+  "Networking|Regional External Application Load Balancer Forwarding Rule Additional|asia-southeast1": "021D-336B-A849",
+  "Networking|Regional External Application Load Balancer Forwarding Rule Minimum|asia-south1": "22FA-9BFA-EC10",
+  "Networking|Regional External Application Load Balancer Forwarding Rule Minimum|asia-south2": {
+    "resource_group": "LoadBalancing",
+    "sku_id": "C132-1BDF-F96F",
+    "unit": "h"
+  },
+  "Networking|Regional External Application Load Balancer Forwarding Rule Minimum|asia-southeast1": "7138-B30C-423B",
+  "Networking|Regional External Application Load Balancer Forwarding Rule Minimum|global": {
+    "catalog_version": "2026-07-27T06:50:51Z",
+    "resource_group": null,
+    "sku_id": null,
+    "unit": null
+  },
+  "Networking|Regional External Application Load Balancer Forwarding Rule Minimum|us-east4": "E8B9-2978-C2CF",
+  "Networking|Regional External Application Load Balancer Outbound Data Processing|asia-south1": {
+    "resource_group": "LoadBalancing",
+    "sku_id": "8625-A380-1224",
+    "unit": "GiBy"
+  },
+  "Networking|Regional External Application Load Balancer Outbound Data Processing|asia-southeast1": {
+    "resource_group": "LoadBalancing",
+    "sku_id": "3275-05B0-D475",
+    "unit": "GiBy"
+  },
+  "Networking|Regional External Application Load Balancer Outbound Data Processing|us-east4": {
+    "resource_group": "LoadBalancing",
+    "sku_id": "8365-2032-F1D3",
+    "unit": "GiBy"
+  },
+  "Networking|^Networking Cloud Armor Policy$|global": "4B13-E64F-4A2B",
+  "Networking|^Networking Cloud Armor Rule$|global": "A321-89BD-F5BC"
+}

@@ -1,0 +1,52 @@
+# Databases
+*.db
+*.duckdb
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Compiled binaries
+cur-web
+cur-web-*
+server
+*.exe
+*.so
+*.dylib
+*.out
+
+# Build artifacts
+frontend/dist/
+frontend/node_modules/
+dist/
+build/
+
+# macOS
+**/.DS_Store
+**/._.DS_Store
+
+# Test / scratch artifacts
+input.csv
+input.parquet
+input.gz
+input.zip
+input.pdf
+
+# AI session notes / scratch docs (not source — never shipped)
+chatgpt.md
+ChatGPT.md
+claude.md
+CLAUDE.md
+NOTES.md
+
+# Temp
+/tmp/
+*.tmp
+
+# Extracted bill CSVs and scripts
+bill_line_items.csv
+bill_line_items_filtered.csv
+scripts/extract_bill_csv.py
+scripts/filter_bill_csv.py
+projection-audit/

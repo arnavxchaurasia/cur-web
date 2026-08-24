@@ -1,0 +1,96 @@
+{
+  "aws_workload": {
+    "m":   "general",
+    "c":   "compute",
+    "r":   "memory",
+    "t":   "burstable",
+    "i":   "storage",
+    "im":  "storage",
+    "is":  "storage",
+    "d":   "storage",
+    "h":   "storage",
+    "hpc": "compute",
+    "g":   "accelerated",
+    "p":   "accelerated"
+  },
+
+  "arch_suffix": {
+    "g": "arm",
+    "a": "amd"
+  },
+
+  "arm_prefix": ["a"],
+
+  "gcp_families": {
+    "general": {
+      "intel": { "family": "N4",  "arm_sku": false, "min_aws_gen": 6, "prev_gen_family": "N2" },
+      "amd":   { "family": "N2D AMD", "arm_sku": false },
+      "arm":   { "family": "C4A", "arm_sku": true  }
+    },
+    "compute": {
+      "intel": { "family": "C3",     "arm_sku": false, "min_aws_gen": 6, "prev_gen_family": "C2D AMD" },
+      "amd":   { "family": "C2D AMD", "arm_sku": false },
+      "arm":   { "family": "C4A",    "arm_sku": true  }
+    },
+    "memory": {
+      "intel": { "family": "N4",  "arm_sku": false, "min_aws_gen": 6, "prev_gen_family": "N2" },
+      "amd":   { "family": "N2D AMD", "arm_sku": false },
+      "arm":   { "family": "C4A", "arm_sku": true  }
+    },
+    "burstable": {
+      "intel": { "family": "E2",  "arm_sku": false },
+      "amd":   { "family": "E2",  "arm_sku": false },
+      "arm":   { "family": "T2A", "arm_sku": true  }
+    },
+    "storage": {
+      "intel": { "family": "N4",  "arm_sku": false, "min_aws_gen": 6, "prev_gen_family": "N2" },
+      "amd":   { "family": "N2D AMD", "arm_sku": false },
+      "arm":   { "family": "C4A", "arm_sku": true  }
+    }
+  },
+
+  "gpu_profiles": {
+    "g": [
+      {
+        "max_gen": 4,
+        "family": "N1",
+        "gpu_desc": "Nvidia Tesla T4 GPU running in",
+        "gpu_per_vcpu": 0.25,
+        "min_count": 1
+      },
+      {
+        "min_gen": 5,
+        "family": "G2",
+        "gpu_desc": "Nvidia L4 GPU running in",
+        "vcpu_breakpoints": [
+          { "min_vcpu": 96, "count": 8 },
+          { "min_vcpu": 48, "count": 4 },
+          { "min_vcpu": 32, "count": 2 }
+        ],
+        "default_count": 1
+      }
+    ],
+    "p": [
+      {
+        "max_gen": 3,
+        "family": "A2",
+        "gpu_desc": "Nvidia Tesla A100 GPU running in",
+        "gpu_per_vcpu": 0.125,
+        "min_count": 1
+      },
+      {
+        "min_gen": 4,
+        "max_gen": 4,
+        "family": "A2",
+        "gpu_desc": "Nvidia Tesla A100 GPU running in",
+        "fixed_count": 8
+      },
+      {
+        "min_gen": 5,
+        "family": "A3",
+        "gpu_desc": "Nvidia H100 80GB GPU",
+        "fixed_count": 8
+      }
+    ]
+  }
+}
