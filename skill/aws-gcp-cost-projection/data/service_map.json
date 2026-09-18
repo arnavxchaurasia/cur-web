@@ -2,7 +2,7 @@
   "_meta": {
     "purpose": "Canonical AWS-service -> GCP-service classification (the 'logical construct'). Single source of truth used by service_classifier.py to force the correct GCP target and eliminate LLM label variance. Grounded in Google's official 'Google Cloud for AWS professionals' service comparison. Curate this file to add/adjust services.",
     "mode_semantics": {
-      "keep": "Pipeline already prices this well deterministically \u2014 classifier only STAMPS metadata (category/reason), never changes pricing or the mapped SKU.",
+      "keep": "Pipeline already prices this well deterministically — classifier only STAMPS metadata (category/reason), never changes pricing or the mapped SKU.",
       "review": "Correct GCP target is known but precise GCP pricing needs per-service modelling. Classifier FORCES gcp_service=target + strategy=passthrough (carry AWS cost, no invented figure) + manual-review flag. Honest baseline until a deterministic pricer is built.",
       "ignore": "Not a real workload cost on GCP (burstable CPU credits, billing fees, taxes, support, refunds). Classifier FORCES strategy='ignore' -> $0. GCP has no equivalent charge."
     },
@@ -11,12 +11,20 @@
   },
   "rules": [
     {
+      "match": "relational database service for mysql community edition",
+      "category": "Database",
+      "gcp_service": "N/A (AWS-only surcharge)",
+      "mode": "ignore",
+      "confidence": 95,
+      "reason": "RDS Extended Support (MySQL Community Edition EOL surcharge). AWS charges per vCPU-hour for running MySQL 5.7 past its EOL date. Cloud SQL has no equivalent surcharge — customers on older MySQL versions pay standard rates. This cost disappears entirely on GCP."
+    },
+    {
       "match": "cloudtrail",
       "category": "Monitoring/Logging",
       "gcp_service": "Cloud Logging",
       "mode": "review",
       "confidence": 55,
-      "reason": "CloudTrail charges per recorded management/data event; Cloud Logging charges primarily by ingested log volume \u2014 a direct event-count-to-log-volume conversion has no reliable basis without knowing average event size, retention, exclusions, and sink configuration. A prior version priced this directly via an LLM event-to-GB guess (confirmed real: one job showed a 97.5% 'saving' the report's own outlier detection flagged as suspicious). Passthrough at AWS cost until a real CloudTrail-specific sizing model exists; architecture review recommended."
+      "reason": "CloudTrail charges per recorded management/data event; Cloud Logging charges primarily by ingested log volume — a direct event-count-to-log-volume conversion has no reliable basis without knowing average event size, retention, exclusions, and sink configuration. Passthrough at AWS cost until a real CloudTrail-specific sizing model exists; architecture review recommended."
     },
     {
       "match": "cloudwatch",
@@ -24,7 +32,7 @@
       "gcp_service": "Cloud Monitoring + Logging",
       "mode": "keep",
       "confidence": 78,
-      "reason": "Multi-component (metrics + logs + alarms + dashboards). Single-SKU mapping under-projected badly (~0.07x); passthrough baseline until component pricer built."
+      "reason": "CloudWatch is multi-component (metrics + logs + alarms + dashboards). PutLogEvents (log ingestion) is priced directly: Cloud Logging Log Ingestion at near cost parity ($0.50/GB AWS vs $0.50/GiB GCP = ~7% cheaper on GCP). Other sub-components (metric API calls, alarms, dashboards) remain passthrough until per-unit pricers are built."
     },
     {
       "match": "natgateway",
@@ -32,7 +40,7 @@
       "gcp_service": "Cloud NAT",
       "mode": "keep",
       "confidence": 82,
-      "reason": "Cloud NAT: gateway-hours (Private Nat Gateway Uptime) + data processed (Cloud Nat Data Processing), each priced by its own real SKU. NOTE: mode changed review->keep — apply_static_mappings.py handles both the Hours row (via FLAT_HOURLY_MAP Private Nat Gateway Uptime) and the Bytes row (via map_data_transfer NatGateway-Bytes branch); review mode was forcing passthrough unconditionally before either pricer ran, losing ~20% savings on NAT-heavy bills."
+      "reason": "Cloud NAT: gateway-hours (Private Nat Gateway Uptime) + data processed (Cloud Nat Data Processing), each priced by its own real SKU."
     },
     {
       "match": "nat gateway",
@@ -40,7 +48,7 @@
       "gcp_service": "Cloud NAT",
       "mode": "keep",
       "confidence": 82,
-      "reason": "Cloud NAT: gateway-hours + data processed. NOTE: mode changed review->keep — same as natgateway entry above."
+      "reason": "Cloud NAT: gateway-hours + data processed."
     },
     {
       "match": "config",
@@ -56,7 +64,7 @@
       "gcp_service": "Dataproc",
       "mode": "keep",
       "confidence": 92,
-      "reason": "Managed Hadoop/Spark -> Dataproc; size by cluster node hours. map_emr() (apply_static_mappings.py) already computes a real Dataproc Premium vCPU-hour rate for EMR management-fee rows (or an honest passthrough for spot/storage/backup rows) - 'review' mode here was unconditionally overwriting that with a generic passthrough, same bug class already fixed for ElastiCache/EFS/BigQuery/etc. 'keep' only stamps category/confidence."
+      "reason": "Managed Hadoop/Spark -> Dataproc; priced by cluster node hours (Dataproc Premium vCPU-hour rate for management-fee rows, or an honest passthrough for spot/storage/backup rows)."
     },
     {
       "match": "glue",
@@ -80,7 +88,7 @@
       "gcp_service": "BigQuery",
       "mode": "keep",
       "confidence": 88,
-      "reason": "Data warehouse -> BigQuery (or BigQuery editions/Dataproc). NOTE: mode changed review->keep \u2014 a dedicated static mapper (apply_static_mappings.py) already resolves a real SKU/rate for this service; 'review' mode was unconditionally overwriting that with a generic passthrough before this rule ever ran (confirmed empirically: this exact clobbering pattern was found and fixed for ElastiCache/EFS/Public-IPv4 earlier, then found to affect this service too across historical job data). keep only stamps category/confidence."
+      "reason": "Data warehouse -> BigQuery (or BigQuery editions/Dataproc)."
     },
     {
       "match": "kinesis",
@@ -88,7 +96,7 @@
       "gcp_service": "Pub/Sub",
       "mode": "keep",
       "confidence": 85,
-      "reason": "Streaming -> Pub/Sub (or Managed Kafka for KDS-heavy). NOTE: mode changed review->keep \u2014 a dedicated static mapper (apply_static_mappings.py) already resolves a real SKU/rate for this service; 'review' mode was unconditionally overwriting that with a generic passthrough before this rule ever ran (confirmed empirically: this exact clobbering pattern was found and fixed for ElastiCache/EFS/Public-IPv4 earlier, then found to affect this service too across historical job data). keep only stamps category/confidence."
+      "reason": "Streaming -> Pub/Sub (or Managed Kafka for KDS-heavy)."
     },
     {
       "match": "managed streaming",
@@ -96,7 +104,7 @@
       "gcp_service": "Compute Engine",
       "mode": "keep",
       "confidence": 75,
-      "reason": "MSK -> self-hosted Kafka on GCE; LLM maps to GCE instance family \u2014 preserving instance-level mapping."
+      "reason": "MSK -> self-hosted Kafka on GCE; LLM maps to GCE instance family — preserving instance-level mapping."
     },
     {
       "match": "msk",
@@ -112,7 +120,7 @@
       "gcp_service": "Compute Engine",
       "mode": "keep",
       "confidence": 72,
-      "reason": "No managed GCP equivalent; LLM maps to self-hosted GCE \u2014 preserving instance-level mapping."
+      "reason": "No managed GCP equivalent; LLM maps to self-hosted GCE — preserving instance-level mapping."
     },
     {
       "match": "elasticsearch",
@@ -125,10 +133,10 @@
     {
       "match": "quicksight",
       "category": "BI",
-      "gcp_service": "Looker",
-      "mode": "review",
+      "gcp_service": "Looker Studio Pro",
+      "mode": "keep",
       "confidence": 80,
-      "reason": "BI -> Looker / Looker Studio Pro (per-user); needs seat sizing."
+      "reason": "BI -> Looker Studio Pro. AWS QuickSight usage_type strings encode role/edition directly (Author vs Reader, Standard vs Enterprise/Pro) and the CUR quantity for these usage types IS the per-user/session count -- a deterministic static mapper (map_quicksight) now converts Author seats to Looker Studio Pro's published $9/user/mo; Reader/session and Q-Topic rows still passthrough (see map_quicksight docstring)."
     },
     {
       "match": "api gateway",
@@ -144,7 +152,7 @@
       "gcp_service": "Cloud Workflows",
       "mode": "keep",
       "confidence": 82,
-      "reason": "Step Functions -> Cloud Workflows; external transitions ($0.025/K transitions on AWS) map to Cloud Workflows steps ($0.01/K steps). Passthrough baseline until per-transition pricer built. NOTE: mode changed review->keep \u2014 a dedicated static mapper (apply_static_mappings.py) already resolves a real SKU/rate for this service; 'review' mode was unconditionally overwriting that with a generic passthrough before this rule ever ran (confirmed empirically: this exact clobbering pattern was found and fixed for ElastiCache/EFS/Public-IPv4 earlier, then found to affect this service too across historical job data). keep only stamps category/confidence."
+      "reason": "Step Functions -> Cloud Workflows; external transitions ($0.025/K transitions on AWS) map to Cloud Workflows steps ($0.01/K steps). Passthrough baseline until per-transition pricer built."
     },
     {
       "match": "amazonstepfunctions",
@@ -152,7 +160,7 @@
       "gcp_service": "Cloud Workflows",
       "mode": "keep",
       "confidence": 82,
-      "reason": "Step Functions (AmazonStepFunctions product alias) -> Cloud Workflows. NOTE: mode changed review->keep \u2014 a dedicated static mapper (apply_static_mappings.py) already resolves a real SKU/rate for this service; 'review' mode was unconditionally overwriting that with a generic passthrough before this rule ever ran (confirmed empirically: this exact clobbering pattern was found and fixed for ElastiCache/EFS/Public-IPv4 earlier, then found to affect this service too across historical job data). keep only stamps category/confidence."
+      "reason": "Step Functions (AmazonStepFunctions product alias) -> Cloud Workflows."
     },
     {
       "match": "waf",
@@ -160,7 +168,7 @@
       "gcp_service": "Cloud Armor",
       "mode": "keep",
       "confidence": 78,
-      "reason": "WAF -> Cloud Armor; multi-component (web ACL/hr + rule/mo + requests/M). Pricing model differs; passthrough baseline until per-component pricer built. NOTE: mode changed review->keep \u2014 a dedicated static mapper (apply_static_mappings.py) already resolves a real SKU/rate for this service; 'review' mode was unconditionally overwriting that with a generic passthrough before this rule ever ran (confirmed empirically: this exact clobbering pattern was found and fixed for ElastiCache/EFS/Public-IPv4 earlier, then found to affect this service too across historical job data). keep only stamps category/confidence."
+      "reason": "WAF -> Cloud Armor; multi-component (web ACL/hr + rule/mo + requests/M). Pricing model differs; passthrough baseline until per-component pricer built."
     },
     {
       "match": "shield",
@@ -206,9 +214,9 @@
       "match": "cloudfront",
       "category": "CDN",
       "gcp_service": "Cloud CDN",
-      "mode": "review",
+      "mode": "keep",
       "confidence": 80,
-      "reason": "CloudFront -> Cloud CDN; egress rates differ by region. Passthrough baseline \u2014 CDN egress needs regional breakdown for accurate pricing."
+      "reason": "CloudFront -> Cloud CDN. Bandwidth rows are priced with dynamic destination-tier selection (Cloud CDN Cache Egress APAC/Americas/EMEA at $0.06-0.08/GB); per-request rows and Origin Shield are priced separately."
     },
     {
       "match": "certificate manager",
@@ -216,7 +224,7 @@
       "gcp_service": "Certificate Manager",
       "mode": "review",
       "confidence": 85,
-      "reason": "ACM public certs are free on both clouds (rows are usually $0, so passthrough = $0 anyway). ACM Private CA ($400/mo) has a GCP CAS equivalent \u2014 passthrough carries that real spend instead of hiding it at $0."
+      "reason": "ACM public certs are free on both clouds (rows are usually $0, so passthrough = $0 anyway). ACM Private CA ($400/mo) has a GCP CAS equivalent — passthrough carries that real spend instead of hiding it at $0."
     },
     {
       "match": "elastic container service for kubernetes",
@@ -224,7 +232,7 @@
       "gcp_service": "Google Kubernetes Engine",
       "mode": "keep",
       "confidence": 88,
-      "reason": "EKS cluster management fee ($0.10/hr/cluster) -> GKE Standard cluster fee ($0.10/hr). Underlying EC2 node costs appear as separate EC2 line items. NOTE: match text was 'elastic kubernetes' before, which never matches AWS's real EKS product string ('Amazon Elastic Container Service for Kubernetes') at all — it's the marketing name (EKS), not the CUR billing product name. That gap let the ECS/Fargate rule below (a genuine substring match on 'elastic container service') incorrectly catch every real EKS row instead, stamping an ECS-Fargate-flavored note ('ECS on EC2 nodes are billed as EC2...') on rows that are actually EKS control-plane fees. Fixed the match text to the real product string, and changed mode review->keep since map_flat_hourly already resolves a real, deterministic 'Zonal Kubernetes Clusters' SKU for these rows — review mode would have unconditionally clobbered that with a generic passthrough, same clobbering-bug class already fixed for ElastiCache/EFS/EMR/etc. elsewhere in this file."
+      "reason": "EKS cluster management fee ($0.10/hr/cluster) -> GKE Standard cluster fee ($0.10/hr, cost parity). Underlying EC2 node costs appear as separate EC2 line items."
     },
     {
       "match": "elastic container service",
@@ -232,7 +240,7 @@
       "gcp_service": "GKE Autopilot",
       "mode": "keep",
       "confidence": 72,
-      "reason": "ECS Fargate tasks -> GKE Autopilot pod capacity. ECS on EC2 nodes are billed as EC2 \u2014 those appear as separate EC2 line items."
+      "reason": "ECS Fargate tasks -> GKE Autopilot pod capacity. ECS on EC2 nodes are billed as EC2 — those appear as separate EC2 line items."
     },
     {
       "match": "fargate",
@@ -248,7 +256,7 @@
       "gcp_service": "Cloud Run Functions",
       "mode": "keep",
       "confidence": 85,
-      "reason": "FaaS -> Cloud Run Functions (per invocation + GB-second memory). NOTE: mode changed review->keep \u2014 'review' mode was unconditionally overwriting a real SKU/rate with a generic passthrough before this rule ever ran (same clobbering pattern found and fixed for ElastiCache/EFS/Public-IPv4). CORRECTION: for CUR-format bills (pricing_unit='Requests'/'Lambda-GB-Second'), map_per_request() in apply_static_mappings.py resolves this deterministically against the real 'Cloud Run Functions' service (previously mis-targeted at the sibling 'Cloud Run' service, which has no Lambda-relevant SKUs at all \u2014 fixed). For PDF-format bills where pricing_unit doesn't match those tokens, the row falls to mechanic_group='misc' and is resolved by the Phase 2 LLM via find-sku.sh instead \u2014 not deterministic, may vary run to run. keep only stamps category/confidence either way."
+      "reason": "FaaS -> Cloud Run Functions (per invocation + GB-second memory). Priced deterministically against real Cloud Run Functions rates where the bill format permits; otherwise resolved case-by-case with GCP billing catalog constraints."
     },
     {
       "match": "elasticache",
@@ -256,7 +264,7 @@
       "gcp_service": "Memorystore",
       "mode": "keep",
       "confidence": 78,
-      "reason": "Redis/Memcached -> Memorystore; size by node GB + tier. map_elasticache() (apply_static_mappings.py) already computes a real GiB-hour formula mapping (or an honest passthrough fallback when node RAM/SKU can't be resolved) \u2014 'review' mode here used to unconditionally overwrite that with a generic Memorystore-label passthrough, discarding the formula pricing entirely. 'keep' only stamps category/confidence, never touches strategy/gcp_service/gcp_sku_id. Verify cluster mode: ElastiCache Redis Cluster mode maps to Memorystore Redis Cluster (different SKU, 30-40% higher). Confidence reduced from 88 to 78 until cluster topology is confirmed."
+      "reason": "Redis/Memcached -> Memorystore; priced by node GB + tier (GiB-hour formula, or an honest passthrough when node RAM/SKU can't be resolved). Verify cluster mode: ElastiCache Redis Cluster mode maps to Memorystore Redis Cluster (different SKU, 30-40% higher) — confidence held lower until cluster topology is confirmed."
     },
     {
       "match": "dynamodb accelerator",
@@ -272,7 +280,7 @@
       "gcp_service": "Memorystore",
       "mode": "review",
       "confidence": 78,
-      "reason": "MemoryDB (durable Redis) -> Memorystore for Redis. Observed misroute to Cloud SQL in past runs \u2014 this rule pins the correct target. Passthrough baseline; node-RAM pricer would improve it."
+      "reason": "MemoryDB (durable Redis) -> Memorystore for Redis. Observed misroute to Cloud SQL in past runs — this rule pins the correct target. Passthrough baseline; node-RAM pricer would improve it."
     },
     {
       "match": "dax",
@@ -296,7 +304,7 @@
       "gcp_service": "Manual Review",
       "mode": "review",
       "confidence": 60,
-      "reason": "Graph DB; no managed GCP equivalent \u2014 self-host or Spanner Graph."
+      "reason": "Graph DB; no managed GCP equivalent — self-host or Spanner Graph."
     },
     {
       "match": "documentdb",
@@ -312,7 +320,7 @@
       "gcp_service": "Database Migration Service",
       "mode": "review",
       "confidence": 88,
-      "reason": "DMS -> Database Migration Service. Note: GCP DMS is FREE for homogeneous migrations (MySQL->Cloud SQL etc.) \u2014 passthrough likely over-projects; review for $0 candidacy."
+      "reason": "DMS -> Database Migration Service. Note: GCP DMS is FREE for homogeneous migrations (MySQL->Cloud SQL etc.) — passthrough likely over-projects; review for $0 candidacy."
     },
     {
       "match": "sagemaker",
@@ -328,7 +336,7 @@
       "gcp_service": "Manual Review",
       "mode": "review",
       "confidence": 60,
-      "reason": "AWS Transfer Family (SFTP/FTPS/FTP) has no managed GCP equivalent \u2014 options are Storage Transfer Service (batch), SFTP on GCE, or third-party. Passthrough with manual-review flag."
+      "reason": "AWS Transfer Family (SFTP/FTPS/FTP) has no managed GCP equivalent — options are Storage Transfer Service (batch), SFTP on GCE, or third-party. Passthrough with manual-review flag."
     },
     {
       "match": "simple notification",
@@ -336,7 +344,7 @@
       "gcp_service": "Pub/Sub",
       "mode": "keep",
       "confidence": 88,
-      "reason": "SNS -> Pub/Sub. NOTE: mode changed review->keep \u2014 a dedicated static mapper (apply_static_mappings.py) already resolves a real SKU/rate for this service; 'review' mode was unconditionally overwriting that with a generic passthrough before this rule ever ran (confirmed empirically: this exact clobbering pattern was found and fixed for ElastiCache/EFS/Public-IPv4 earlier, then found to affect this service too across historical job data). keep only stamps category/confidence."
+      "reason": "SNS -> Pub/Sub."
     },
     {
       "match": "simple queue",
@@ -344,7 +352,7 @@
       "gcp_service": "Pub/Sub",
       "mode": "keep",
       "confidence": 88,
-      "reason": "SQS -> Pub/Sub. NOTE: mode changed review->keep \u2014 a dedicated static mapper (apply_static_mappings.py) already resolves a real SKU/rate for this service; 'review' mode was unconditionally overwriting that with a generic passthrough before this rule ever ran (confirmed empirically: this exact clobbering pattern was found and fixed for ElastiCache/EFS/Public-IPv4 earlier, then found to affect this service too across historical job data). keep only stamps category/confidence."
+      "reason": "SQS -> Pub/Sub."
     },
     {
       "match": "simple email",
@@ -360,7 +368,7 @@
       "gcp_service": "Cloud Filestore",
       "mode": "keep",
       "confidence": 85,
-      "reason": "NFS file storage -> Cloud Filestore; price per provisioned GB + tier. map_efs() (apply_static_mappings.py) already computes real per-tier Filestore capacity pricing (or an honest passthrough fallback for Provisioned Throughput/IO rows with no Filestore equivalent) \u2014 'review' mode here used to unconditionally overwrite that with a generic passthrough, same bug class as the ElastiCache rule. 'keep' only stamps category/confidence."
+      "reason": "NFS file storage -> Cloud Filestore; priced per provisioned GB + tier (real per-tier Filestore capacity pricing, or an honest passthrough for Provisioned Throughput/IO rows with no Filestore equivalent)."
     },
     {
       "match": "directory service",
@@ -376,7 +384,7 @@
       "gcp_service": "Cloud Billing",
       "mode": "review",
       "confidence": 90,
-      "reason": "Native billing/reporting is free in GCP \u2014 likely $0."
+      "reason": "Native billing/reporting is free in GCP — likely $0."
     },
     {
       "match": "key management",
@@ -403,6 +411,14 @@
       "reason": "Threat detection -> SCC Premium (different pricing model)."
     },
     {
+      "match": "inspector",
+      "category": "Security",
+      "gcp_service": "Security Command Center",
+      "mode": "review",
+      "confidence": 70,
+      "reason": "Amazon Inspector (per-resource vulnerability scanning: EC2/ECR/Lambda) -> SCC Premium (per-asset-under-management pricing); pricing models are structurally different (per-scan vs per-asset/mo), so carried as an honest passthrough rather than an invented rate -- same treatment as GuardDuty/Security Hub above."
+    },
+    {
       "match": "vpcendpoint",
       "category": "Networking",
       "gcp_service": "Private Service Connect",
@@ -416,7 +432,7 @@
       "gcp_service": "Network Connectivity Center",
       "mode": "keep",
       "confidence": 72,
-      "reason": "Transit Gateway -> NCC hub (per attachment + data). NOTE: mode changed review->keep \u2014 a dedicated static mapper (apply_static_mappings.py) already resolves a real SKU/rate for this service; 'review' mode was unconditionally overwriting that with a generic passthrough before this rule ever ran (confirmed empirically: this exact clobbering pattern was found and fixed for ElastiCache/EFS/Public-IPv4 earlier, then found to affect this service too across historical job data). keep only stamps category/confidence."
+      "reason": "Transit Gateway -> NCC hub (per attachment + data)."
     },
     {
       "match": "vpnconnection",
@@ -424,7 +440,15 @@
       "gcp_service": "Cloud VPN",
       "mode": "keep",
       "confidence": 82,
-      "reason": "VPN -> Cloud VPN (per tunnel-hour + egress). NOTE: mode changed review->keep \u2014 a dedicated static mapper (apply_static_mappings.py) already resolves a real SKU/rate for this service; 'review' mode was unconditionally overwriting that with a generic passthrough before this rule ever ran (confirmed empirically: this exact clobbering pattern was found and fixed for ElastiCache/EFS/Public-IPv4 earlier, then found to affect this service too across historical job data). keep only stamps category/confidence."
+      "reason": "VPN -> Cloud VPN (per tunnel-hour + egress)."
+    },
+    {
+      "match": "clientvpn",
+      "category": "Networking",
+      "gcp_service": "BeyondCorp Enterprise / IAP (manual review)",
+      "mode": "review",
+      "confidence": 40,
+      "reason": "AWS Client VPN is user-to-site remote-access VPN (billed per active connection-hour). GCP Cloud VPN is site-to-site IPsec (billed per always-on tunnel-hour) — a different product class that cannot serve the same purpose, so it is not used as the target here. GCP's nearest equivalent is zero-trust access via BeyondCorp Enterprise / IAP, which carries a different pricing model entirely. Passthrough at AWS cost pending manual review with the customer."
     },
     {
       "match": "vpn",
@@ -432,7 +456,7 @@
       "gcp_service": "Cloud VPN",
       "mode": "keep",
       "confidence": 78,
-      "reason": "VPN -> Cloud VPN. NOTE: mode changed review->keep \u2014 a dedicated static mapper (apply_static_mappings.py) already resolves a real SKU/rate for this service; 'review' mode was unconditionally overwriting that with a generic passthrough before this rule ever ran (confirmed empirically: this exact clobbering pattern was found and fixed for ElastiCache/EFS/Public-IPv4 earlier, then found to affect this service too across historical job data). keep only stamps category/confidence."
+      "reason": "VPN -> Cloud VPN."
     },
     {
       "match": "route 53 resolver",
@@ -440,7 +464,7 @@
       "gcp_service": "Cloud DNS (forwarding/policies)",
       "mode": "review",
       "confidence": 70,
-      "reason": "Resolver endpoints (DNS resolution/forwarding) != authoritative managed zone; needs Cloud DNS policies / hybrid DNS \u2014 architecture review."
+      "reason": "Resolver endpoints (DNS resolution/forwarding) != authoritative managed zone; needs Cloud DNS policies / hybrid DNS — architecture review."
     },
     {
       "match": "resolver endpoint",
@@ -472,7 +496,7 @@
       "gcp_service": "External IP",
       "mode": "keep",
       "confidence": 85,
-      "reason": "Public IPv4 -> External IP charge (per IP-hour). map_flat_hourly() already resolves the real 'External IP Charge on a Standard VM' SKU and rate for this row (exact per-IP-hour parity) \u2014 'review' mode here was unconditionally overwriting that with a generic passthrough before the sibling 'virtual private cloud' rule (mode='keep') ever got a chance, same bug class as the ElastiCache/EFS clobbering fixed earlier. 'keep' only stamps category/confidence."
+      "reason": "Public IPv4 -> External IP charge (per IP-hour), exact per-IP-hour parity."
     },
     {
       "match": "virtual private cloud",
@@ -571,7 +595,7 @@
       "gcp_service": "N/A (AWS-only)",
       "mode": "ignore",
       "confidence": 95,
-      "reason": "AWS negotiated discount; nets AWS total down. GCP has no equivalent \u2014 GCP side stays at list ($0 offset)."
+      "reason": "AWS negotiated discount; nets AWS total down. GCP has no equivalent — GCP side stays at list ($0 offset)."
     },
     {
       "match": "edp discount",

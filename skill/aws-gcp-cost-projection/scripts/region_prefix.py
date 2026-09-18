@@ -31,21 +31,28 @@ UT_PREFIX_TO_GCP: dict[str, str] = {
     "aps5": "asia-south2",               # ap-south-2     → Delhi/Hyderabad
     "aps6": "asia-southeast2",           # ap-southeast-3 → Jakarta
     "apn1": "asia-northeast1",           # ap-northeast-1 → Tokyo
-    "apn2": "asia-northeast2",           # ap-northeast-2 → Seoul
-    "apn3": "asia-northeast3",           # ap-northeast-3 → Osaka
+    "apn2": "asia-northeast3",            # ap-northeast-2 → Seoul (GCP's Seoul region is
+                                          # asia-northeast3, not -2 — was swapped with apn3)
+    "apn3": "asia-northeast2",            # ap-northeast-3 → Osaka (GCP's Osaka region is
+                                          # asia-northeast2, not -3 — was swapped with apn2)
     "use1": "us-east4",                  # us-east-1      → N. Virginia
     "use2": "us-east4",                  # us-east-2      → Ohio
-    "usw1": "us-west1",                  # us-west-1      → N. California
-    "usw2": "us-west2",                  # us-west-2      → Oregon
+    "usw1": "us-west2",                  # us-west-1      → N. California (GCP's us-west2 is
+                                          # Los Angeles — was swapped with usw2)
+    "usw2": "us-west1",                  # us-west-2      → Oregon (GCP's us-west1 is
+                                          # The Dalles, Oregon — was swapped with usw1)
     "usw3": "us-west2",                  # us-west-3      → Salt Lake City
     "usw4": "us-west1",                  # us-west-4      → Las Vegas
     "euw1": "europe-west1",              # eu-west-1      → Ireland
     "euw2": "europe-west2",              # eu-west-2      → London
-    "euw3": "europe-west3",              # eu-west-3      → Paris
+    "euw3": "europe-west9",              # eu-west-3      → Paris
     "euw4": "europe-west4",              # eu-west-4      → Netherlands
     "eun1": "europe-north1",             # eu-north-1     → Stockholm
     "euc1": "europe-west3",              # eu-central-1   → Frankfurt
-    "euc2": "europe-west3",              # eu-central-2   → Zurich
+    "euc2": "europe-west4",              # eu-central-2   → Zurich (was incorrectly aliased onto
+                                          # euc1's Frankfurt value — the two AWS regions became
+                                          # indistinguishable downstream; kept in sync with
+                                          # ingest.py's REGION_MAP, the source of truth)
     "cac1": "northamerica-northeast1",   # ca-central-1   → Montreal
     "sae1": "southamerica-east1",        # sa-east-1      → São Paulo
     "mec1": "me-central1",              # me-central-1   → UAE

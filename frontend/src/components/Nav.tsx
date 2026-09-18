@@ -10,20 +10,30 @@ function handleSignOut(e: React.MouseEvent) {
 }
 
 export function Nav({ user }: Readonly<{ user: UserInfo }>) {
-
   return (
     <nav className="flex items-center justify-between px-6 py-3 border-b border-white/10 anim-slide-down backdrop-blur-sm bg-[#0a0a0f]/80 sticky top-0 z-30">
-      <Link to="/" className="flex items-center gap-3 transition-opacity duration-150 hover:opacity-85">
-        <img src={facetsFIcon} alt="Facets" className="h-5" />
-        <span className="hidden sm:inline text-white/30">|</span>
-        <span className="text-sm font-semibold tracking-tight">
-          <span className="hidden sm:inline">AWS → GCP Cost Estimator</span>
-          <span className="sm:hidden">Estimator</span>
-        </span>
-      </Link>
+      <div className="flex items-center gap-3">
+        <Link to="/" className="flex items-center gap-3 transition-opacity duration-150 hover:opacity-85">
+          <img src={facetsFIcon} alt="Facets" className="h-5" />
+          <span className="hidden sm:inline text-white/30">|</span>
+          <span className="text-sm font-semibold tracking-tight">
+            <span className="hidden sm:inline">AWS → GCP Cost Estimator</span>
+            <span className="sm:hidden">Estimator</span>
+          </span>
+        </Link>
+      </div>
       <div className="flex items-center gap-4 text-sm text-gray-400">
         {user.is_admin && (
-          <Link to="/admin" className="nav-link text-[#00C2BB]">All Reports</Link>
+          <div className="hidden sm:flex items-center gap-4">
+            <Link to="/admin" className="nav-link text-[#00C2BB]">All Reports</Link>
+            <Link to="/admin/users" className="nav-link text-gray-400 hover:text-white">Users</Link>
+            <Link to="/admin/catalog" className="nav-link text-gray-400 hover:text-white">Catalog</Link>
+            <Link to="/admin/analytics" className="nav-link text-gray-400 hover:text-white">Analytics</Link>
+            <Link to="/admin/audit" className="nav-link text-gray-400 hover:text-white">Audit</Link>
+          </div>
+        )}
+        {user.is_admin && (
+          <Link to="/admin" className="sm:hidden nav-link text-[#00C2BB]">Admin</Link>
         )}
         <span className="hidden sm:inline">{user.email}</span>
         <button onClick={handleSignOut} className="nav-link text-[#645DF6]">Sign Out</button>

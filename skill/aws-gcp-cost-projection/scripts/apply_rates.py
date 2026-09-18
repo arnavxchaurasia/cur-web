@@ -723,6 +723,73 @@ def main():
             ON CONFLICT DO NOTHING
         """, (_sku_id, _sku_name, _rate))
 
+    # Looker Studio Pro (per-user): $9/user/mo published list price. Looker
+    # Studio is billed as a SaaS product outside standard Cloud Billing SKUs,
+    # so it is not in the bundled catalog — inject it the same way the egress
+    # rates above are injected, so map_quicksight()'s Author-seat rows resolve
+    # to strategy='map' with a stable, correct $/user rate instead of falling
+    # to passthrough for lack of a catalog SKU.
+    # Rate source: cloud.google.com/looker-studio/pricing (Pro per-user tier).
+    conn.execute("""
+        INSERT INTO gcp_sku_rates VALUES
+        ('GCP-LOOKER-STUDIO-PRO-USER', 'Looker Studio Pro', 'Looker Studio Pro (per user)',
+         'ApplicationServices', 'BusinessIntelligence', 'OnDemand', 'global', 'user',
+         9.0, 'canonical-looker-studio-pro', 'https://cloud.google.com/looker-studio/pricing')
+        ON CONFLICT DO NOTHING
+    """)
+
+    # Cloud Logging Log Ingestion: NOT injected as a pseudo-SKU — the real
+    # catalog SKU "Log Storage cost" (143F-A1B0-E0BE) already carries the
+    # correct rate: despite its misleading name, its tiered_rates entry
+    # (0-50 GiB free, 50+ GiB: $0.50/GiB) IS GCP's real published log
+    # ingestion pricing. apply_static_mappings.py's map_cloudwatch()
+    # resolves it dynamically by name via resolve_sku() for both
+    # PutLogEvents and generic log-volume rows, so a catalog refresh (rate
+    # change, new region coverage) is picked up automatically instead of
+    # going stale behind a fixed injected value.
+
+    # Cloud Logging Log Storage (extended retention): NOT injected as a
+    # pseudo-SKU — the real catalog SKU "Log Retention cost"
+    # (F4AE-5A52-ACE3, $0.01/GiBy.mo) already carries the correct rate.
+    # apply_static_mappings.py's map_cloudwatch() resolves it dynamically by
+    # name via resolve_sku(). The catalog's confusingly-similar "Log Storage
+    # cost" SKU (143F-A1B0-E0BE) is NOT this rate — despite the name, its
+    # tiered_rates entry is (0-50 GiB free, 50+ GiB: $0.50/GiB), the
+    # INGESTION tier structure — a prior fix here mistakenly matched that
+    # SKU and injected a hardcoded pseudo-rate to work around it, which
+    # just meant the real catalog SKU (and any future rate change to it)
+    # was silently ignored. Using the real catalog entry means a future
+    # catalog refresh stays accurate automatically instead of going stale
+    # behind a fixed injected value.
+
+    # Regional External Application Load Balancer Data Processing: $0.008/GiB.
+    # The bundled catalog only carries the Forwarding Rule Minimum (hourly) SKU;
+    # inject the data-processing SKU so ALB LCU-hr rows resolve to strategy='map'.
+    # Mapping assumption: 1 LCU-hr ≈ 1 GB when bandwidth is the dominant LCU dimension
+    # (typical HTTP workloads); connection-heavy workloads (WebSockets, long-lived TCP)
+    # will have fewer actual GB per LCU-hr, making this an over-estimate of GCP cost.
+    # Rate source: cloud.google.com/vpc/network-pricing (LB data processing).
+    conn.execute("""
+        INSERT INTO gcp_sku_rates VALUES
+        ('GCP-REXT-ALB-DATA-GIB', 'Networking',
+         'Regional External Application Load Balancer Data Processing',
+         'Network', 'LoadBalancing', 'OnDemand', 'global', 'gibibyte',
+         0.008, 'canonical-alb-data', 'https://cloud.google.com/vpc/network-pricing')
+        ON CONFLICT DO NOTHING
+    """)
+
+    # Global External Passthrough Network Load Balancer Data Processing: $0.008/GiB.
+    # Same injection pattern as ALB above — NLB LCU-hr rows need this to map.
+    # Rate source: cloud.google.com/vpc/network-pricing.
+    conn.execute("""
+        INSERT INTO gcp_sku_rates VALUES
+        ('GCP-REXT-NLB-DATA-GIB', 'Networking',
+         'Global External Passthrough Network Load Balancer Data Processing',
+         'Network', 'LoadBalancing', 'OnDemand', 'global', 'gibibyte',
+         0.008, 'canonical-nlb-data', 'https://cloud.google.com/vpc/network-pricing')
+        ON CONFLICT DO NOTHING
+    """)
+
     # Flag commercial-license rows (Windows/SQL Server/Oracle) so they are never
     # silently under-projected — confidence capped + note stamped.
     flag_license_exposure(conn)

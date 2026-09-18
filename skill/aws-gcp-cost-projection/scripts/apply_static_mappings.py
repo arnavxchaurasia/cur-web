@@ -83,6 +83,13 @@ GCP_HYPERDISK_BALANCED  = "Hyperdisk Balanced Capacity"  # real catalog name, co
 # via find-sku.sh). Pairing classic-PD capacity with Hyperdisk-only performance
 # add-ons on the same disk isn't purchasable on real GCP; Hyperdisk Balanced Capacity
 # keeps the whole volume within one real, coherent product family.
+GCP_CLOUD_ARMOR_ENTERPRISE_ENROLLMENT = "Networking Cloud Armor Enterprise Paygo: Enrollment"
+# Real catalog SKU, confirmed: flat $200/mo, region 'global'. This is the actual
+# GCP charge for the Enterprise tier that Bot Control/Fraud Control/Anti-DDoS
+# managed-rule protection requires — previously these AWS fixed-fee rows had no
+# dedicated branch at all (see map_flat_hourly below) and fell through to the
+# "Other Hourly Charge" sentinel, which never resolves to a real SKU, forcing an
+# unconditional passthrough even though a real GCP SKU for this exact feature exists.
 GCP_STANDARD_PD         = "Storage PD Capacity"  # real catalog name (confirmed via find-sku.sh);
 # the old "Standard Persistent Disk Capacity" string never matched any real SKU, so
 # resolve_sku() always returned None here and every st1/sc1/standard/magnetic EBS row
@@ -173,7 +180,7 @@ _S3_USAGE_TYPE_ROUTING = [
     ("timedstorage-deeparchivebytehrs",   GCS_ARCHIVE),    # Glacier Deep Archive (compact form)
     ("timedstorage-glacierdeeparchive",   GCS_ARCHIVE),    # Glacier Deep Archive (expanded form)
     ("timedstorage-gda-bytehrs",          GCS_ARCHIVE),    # GDA alias
-    ("timedstorage-glacierbytehrs",       GCS_COLDLINE),   # Glacier Flexible
+    ("timedstorage-glacierbytehrs",       GCS_COLDLINE),   # Glacier Flexible → Coldline (90-day minimum matches AWS's 90-day min; GCS Archive's 365-day minimum does not)
     ("timedstorage-gir-bytehrs",          GCS_COLDLINE),   # Glacier Instant Retrieval
     # IA variants
     ("timedstorage-sia-bytehrs",          GCS_NEARLINE),   # Standard-IA
@@ -228,7 +235,7 @@ _S3_BLOB_FALLBACK_MAP = {
     "glacierdeeparchive":   GCS_ARCHIVE,
     "glacier instant":      GCS_COLDLINE,
     "glacierinstant":       GCS_COLDLINE,
-    "glacier flexible":     GCS_COLDLINE,
+    "glacier flexible":     GCS_COLDLINE,   # 90-day minimum matches AWS's 90-day min; Archive's 365-day minimum does not
     "glacierflexible":      GCS_COLDLINE,
     "archive instant":      GCS_COLDLINE,
     "standard-ia":          GCS_NEARLINE,
@@ -346,6 +353,18 @@ FLAT_HOURLY_MAP = [
     # SKU at all — wrong description AND wrong service.
     (r"DirectConnect|DX|HostedConnection",
      GCP_COMPUTE_ENGINE, r"Cloud Interconnect - 10Gbps Dedicated circuit", 1.0),
+    # Global Accelerator's per-hour FIXED FEE (accelerator provisioned,
+    # independent of traffic volume) is a genuinely different charge from GA's
+    # data-transfer/egress rows below it — the blanket "no SKU" rule used to
+    # catch both under one regex, even though this specific fee has a real,
+    # fair GCP equivalent: the anycast static-IP forwarding rule a Global
+    # External ALB requires is billed the same way (a flat per-hour minimum,
+    # independent of traffic), via "Cloud Load Balancer Forwarding Rule
+    # Minimum Global" ($0.025/hr, global — confirmed via data/catalog.duckdb:
+    # sku_id DEE3-C42E-3E4D). Must come before the broader GA/CloudFront
+    # catch-all below so this specific fixed-fee shape is matched first.
+    (r"(?:GlobalAccelerator|Global Accelerator).*fixed.?fee|fixed.?fee.*(?:GlobalAccelerator|Global Accelerator)",
+     "Networking", r"Cloud Load Balancer Forwarding Rule Minimum Global", 1.0),
     # Global Accelerator / CloudFront (see PER_REQUEST_MAP below) intentionally
     # do NOT map to a resolved SKU. GCP has no per-GB "Cloud CDN cache egress"
     # charge the way AWS bills CloudFront/GA egress — Cloud CDN's only
@@ -404,6 +423,11 @@ PER_REQUEST_MAP = [
     # function's "no known GCP equivalent" branch gives an honest passthrough
     # instead of a confidently wrong "Cache Egress" SKU that doesn't exist.
     (r"WAF",                   "Cloud Armor",     "Cloud Armor Requests",          1.0),
+    # Route 53 DNS queries → Cloud DNS. Both charge $0.40/M for first 1B queries
+    # and $0.20/M thereafter — cost parity. Hosted-zone fees are caught by
+    # flat_hourly (unit=Hrs) so only per-query rows reach this mapper.
+    # Pattern matches catalog SKU "DNS Query (port 53)".
+    (r"Route.?53",             "Cloud DNS",       "DNS Query",                     1.0),
     (r"Rekognition",           "Cloud Vision",    "Vision API Requests",           1.0),
     (r"Comprehend",            "Natural Language API", "NL API Requests",          1.0),
     (r"Translate",             "Cloud Translation",   "Translation Characters",    1.0),
@@ -415,10 +439,15 @@ PER_REQUEST_MAP = [
 # in the Compute Engine catalog). RDS/managed-db storage rows that landed here map
 # to Cloud SQL storage instead (branched on product in map_block_storage).
 EBS_VOLUME_MAP = {
-    # gp2 maps to Hyperdisk Balanced ($0.083/GB-Mo) for cost comparison; even
-    # though gp2 bundles IOPS, Hyperdisk Balanced is the realistic GCP landing
-    # zone for migrated workloads and is cheaper than Balanced PD ($0.120/GB-Mo).
-    "gp2": GCP_HYPERDISK_BALANCED,
+    # gp2 never gets a separate provisioned-IOPS/throughput fee (IOPS is bundled
+    # into capacity, scaling with volume size) — unlike gp3/io1/io2, there is no
+    # coupled Hyperdisk-only performance SKU forcing it to stay in that product
+    # family. Hyperdisk Balanced also isn't attachable to every machine series
+    # (notably not N2D, the default x86 target family for most EC2 fleets) —
+    # defaulting gp2 to it produces disk/instance combinations that don't
+    # actually deploy on GCP. Classic Balanced PD Capacity is a correct,
+    # broadly-attachable standalone match with no such compatibility gap.
+    "gp2": GCP_BALANCED_PD,
     # gp3 DOES get a separate provisioned-IOPS/throughput fee (priced against
     # Hyperdisk Balanced IOPS/Throughput elsewhere in this function) — must
     # stay on Hyperdisk Balanced Capacity for the same volume, not classic
@@ -447,7 +476,20 @@ def _transfer_target(usage_type, operation):
       - other '...-Out-Bytes' to internet       → internet egress
     """
     ut = f"{usage_type or ''} {operation or ''}".lower()
-    if re.search(r"in-bytes|datatransfer-in|\bin\b.*byte", ut):
+    # `\bin\b.*byte` (unbounded distance) was a confirmed real bug: the caller
+    # concatenates operation + product before calling this function, and PDF-
+    # ingested product names almost universally end in "...-Out-Bytes" or
+    # "...-In-Bytes" — so ANY row whose operation text happens to contain the
+    # standalone word "in" ANYWHERE (e.g. "...in/out/between EC2 AZs...", a
+    # genuine inter-AZ EGRESS description) false-matched against the unrelated
+    # "-Bytes" suffix from the product name much later in the string, silently
+    # misclassifying real egress as free ingress. Confirmed live: an inter-AZ
+    # transfer row ($116.51, "regional data transfer - in/out/between EC2
+    # AZs...", product "...AWS-Out-Bytes") was ignored as "ingress is free"
+    # this way. Real ingress signals only ever put "in"/"In" directly adjacent
+    # to "bytes" (hyphen or space) — require that adjacency instead of letting
+    # the two words match anywhere in the whole concatenated blob.
+    if re.search(r"in-bytes|datatransfer-in|\bin[\s-]+bytes\b", ut):
         return ("ignore", None, "ingress is free on GCP")
     # VPC Peering traffic is private intra-AWS-network traffic, not public
     # internet egress — AWS's own $0.01/GB rate on these rows matches its
@@ -458,10 +500,19 @@ def _transfer_target(usage_type, operation):
     # traffic class entirely.
     if "vpcpeering" in ut:
         return ("map", "interzone", "VPC Peering — private inter-VPC traffic, not internet egress")
-    # Region-to-region code pair (e.g. "aps1-apn1-aws-out-bytes") → inter-region.
-    if re.search(r"\b[a-z]{2,4}\d?-[a-z]{2,4}\d?-aws-out", ut) or "inter-region" in ut or "interregion" in ut:
-        return ("map", "interregion", "inter-region egress")
-    # 'regional'/intra-AZ = same-region cross-zone traffic → inter-zone.
+    # 'regional'/intra-AZ = same-region cross-zone traffic → inter-zone. Checked
+    # BEFORE the inferred region-pair pattern below: confirmed real bug — the
+    # caller concatenates operation + product, and PDF ingestion has been found
+    # (twice now, same root cause as the CloudFront bandwidth mislabeling) to
+    # carry over the WRONG product name onto a "Bandwidth" sub-section row —
+    # e.g. a genuine "$0.010 per GB - regional data transfer - in/out/between
+    # EC2 AZs..." row ($116.51) was mislabeled with product
+    # "...APS3-WAW1-AWS-Out-Bytes", whose region-pair-looking code would
+    # otherwise win the interregion check below and misprice real inter-AZ
+    # traffic at the wrong (interregion) rate. `operation`'s explicit
+    # "regional"/AZ wording is AWS's own, deliberate description of this
+    # exact row and takes priority over a code inferred from a field that has
+    # already been shown to sometimes carry a sibling row's label.
     # NOTE: bare "bandwidth" is NOT a locality signal — AWS uses it as the generic
     # usage_type/product category label across internet-out, region-to-region, AND
     # actual regional/AZ transfer rows alike (confirmed across job DBs). The real
@@ -470,6 +521,9 @@ def _transfer_target(usage_type, operation):
     # positives bare "bandwidth" was causing on internet-egress and inter-region rows.
     if "regional" in ut or "intra" in ut or re.search(r"az.*az", ut):
         return ("map", "interzone", "inter-zone (same-region) egress")
+    # Region-to-region code pair (e.g. "aps1-apn1-aws-out-bytes") → inter-region.
+    if re.search(r"\b[a-z]{2,4}\d?-[a-z]{2,4}\d?-aws-out", ut) or "inter-region" in ut or "interregion" in ut:
+        return ("map", "interregion", "inter-region egress")
     return ("map", "internet", "internet egress")
 
 
@@ -532,7 +586,8 @@ def _no_rate_suffix(sku_id, gcp_region):
     described the same way as successfully-priced ones."""
     if sku_id:
         return ""
-    return f" — no GCP rate found in {gcp_region}; AWS cost carried through unpriced, NOT a GCP cost estimate"
+    return (f" [no GCP rate found in {gcp_region} for this SKU — carried through at AWS cost as a "
+            f"placeholder pending a real rate; treat this row's GCP figure as unverified, not a priced estimate]")
 
 
 _FAMILY_RATE_CACHE = {}
@@ -684,6 +739,23 @@ _GP_FAMILY_WORKLOAD     = _gcp_cfg.get("gp_family_workload",     {
     "Z3": "storage",
 })
 _GP_FAMILY_NETWORK_TIER = _gcp_cfg.get("gp_family_network_tier", {"E2": "standard", "T2A Arm": "standard"})
+# Hardware generation per family — used by cheapest_in_scope()'s generation
+# floor below. Confirmed real bug this fixes: cheapest_in_scope() swept every
+# family in-tier/workload for the lowest $/vCPU with NO regard for generation
+# at all, so a modern gen-6+ AWS source (m6a/r6a/c6a) whose default target is
+# N4D/C4D (4th-gen, per family_map.json) was routinely "cost-tier switched"
+# down to N2D AMD/C2D AMD (2nd-gen) whenever the older, slower hardware
+# happened to be cheaper per vCPU in that region (confirmed live: asia-south1
+# N2D AMD $0.018151/vCPU vs N4D $0.022124/vCPU) — silently trading current-gen
+# hardware for legacy hardware for a cost delta the customer never asked to
+# make, the same class of problem the tier/workload Performance-Tier Safety
+# Rule already exists to prevent, just on the generation axis instead.
+_GP_FAMILY_GENERATION = _gcp_cfg.get("gp_family_generation", {
+    "N1 Predefined": 1, "E2": 2, "N2": 2, "N2D AMD": 2, "C2D AMD": 2,
+    "T2D AMD": 3, "C3": 3, "C3D": 3, "M3 Memory-optimized": 3, "Z3": 3,
+    "N4": 4, "N4D": 4, "N4A": 4, "T2A Arm": 4, "C4A Arm": 4,
+    "C4": 4, "C4D": 4, "C4N": 4, "M4": 4, "M4Ultramem224": 4,
+})
 
 # Structural noise patterns in the catalog's "<Family> Instance Core/Ram"
 # descriptions that are NOT selectable families in their own right — Sole
@@ -811,7 +883,7 @@ def _arm_workloads():
     return tuple({f[5] for f in _discover_gp_families() if f[3] == "arm"})
 
 
-def cheapest_in_scope(default_label, vcpu, ram_gib, region, archs, tiers, workloads=("general",), min_network_tier="standard"):
+def cheapest_in_scope(default_label, vcpu, ram_gib, region, archs, tiers, workloads=("general",), min_network_tier="standard", min_generation=None):
     """Price every family in `_GP_FAMILIES` whose (arch, tier, workload) is
     allowed by `archs`/`tiers`/`workloads` for this region/spec, and return
     the genuinely cheapest. `archs`/`tiers` define what's SAFE to compare per
@@ -830,6 +902,20 @@ def cheapest_in_scope(default_label, vcpu, ram_gib, region, archs, tiers, worklo
     can never be silently substituted even if cheaper; defaults to
     "standard" (no restriction) since that's what every pre-existing caller
     already implicitly allowed.
+    `min_generation` overrides the generation floor described below when the
+    caller's own `default_label` generation is lower than the floor it
+    actually wants enforced — e.g. a burstable source (E2, gen 2) whose
+    sustained-alternative candidates must still never fall below gen 4
+    (N4D/C4D/C4A), not merely same-or-newer than E2 itself. `default_label`'s
+    own family is always left in the candidate pool regardless of this floor
+    (it's the tier-native match, never itself rejected on generation), but
+    every OTHER family must clear `min_generation` (or `default_label`'s own
+    generation, if `min_generation` is unset) to be considered for a pure
+    cost-tier switch. Confirmed real bug this fixes: without it, burstable
+    rows floored purely against E2 (gen 2) let N2D AMD (also gen 2) win on
+    price alone — the exact legacy-hardware substitution the generation floor
+    exists to prevent, just reached through the burstable path instead of the
+    sustained one.
     Which SPECIFIC families exist to consider is entirely driven by
     `_GP_FAMILIES` — callers never hardcode a candidate list.
     Returns (label, core_desc, ram_desc, switched, reason) — same shape as
@@ -850,8 +936,14 @@ def cheapest_in_scope(default_label, vcpu, ram_gib, region, archs, tiers, worklo
         drr = _family_hourly_rate(GCP_COMPUTE_ENGINE, dram, region)
         if dcr is not None and drr is not None:
             default_rate = vcpu * dcr + ram_gib * drr
+    default_gen = _GP_FAMILY_GENERATION.get(default_label, 0)
+    floor_gen = min_generation if min_generation is not None else default_gen
 
-    priced = []
+    priced = []          # same-or-newer generation than the floor (or the
+                          # default_label itself) — the only pool a pure
+                          # cost-tier switch is allowed to pick from
+    priced_any_gen = []   # every generation — last-resort fallback only when the
+                          # default's own generation has NOTHING priced in-region
     for label, core_desc, ram_desc, arch, tier, workload, network_tier in _GP_FAMILIES:
         if arch not in archs or tier not in tiers or workload not in workloads:
             continue
@@ -861,12 +953,28 @@ def cheapest_in_scope(default_label, vcpu, ram_gib, region, archs, tiers, worklo
         ram_rate  = _family_hourly_rate(GCP_COMPUTE_ENGINE, ram_desc, region)
         if core_rate is None or ram_rate is None:
             continue
-        priced.append((vcpu * core_rate + ram_gib * ram_rate, label, core_desc, ram_desc))
+        entry = (vcpu * core_rate + ram_gib * ram_rate, label, core_desc, ram_desc)
+        priced_any_gen.append(entry)
+        # Generation floor (see _GP_FAMILY_GENERATION comment above): a pure
+        # cost-tier switch may only move to a same-or-newer-generation family
+        # (relative to `floor_gen`, not necessarily `default_gen` — see
+        # `min_generation` above), never trade current-gen hardware for
+        # older/cheaper hardware. `default_label`'s own family is always a
+        # legitimate candidate (the tier-native match), regardless of floor.
+        if label == default_label or _GP_FAMILY_GENERATION.get(label, 0) >= floor_gen:
+            priced.append(entry)
 
-    if not priced:
+    if not priced_any_gen:
         dcore = default_entry[1] if default_entry else None
         dram  = default_entry[2] if default_entry else None
         return default_label, dcore, dram, False, None
+    if not priced:
+        # Default's own generation has no priced candidate in-region at all
+        # (e.g. a genuinely unavailable modern family) — fall back to any
+        # generation rather than hard-failing; this is the "unavailable"
+        # path, not a cost optimization, so the generation floor doesn't
+        # apply here.
+        priced = priced_any_gen
 
     priced.sort(key=lambda x: x[0])
     _, best_label, best_core, best_ram = priced[0]
@@ -1072,6 +1180,11 @@ def lookup_sku_in_catalog(gcp_service, desc_pattern, gcp_region):
         "Cloud DNS": "Networking",
         "Cloud NAT": "Networking",
         "Cloud Load Balancing": "Networking",
+        # Cloud Armor billing SKUs live under the Networking service in the
+        # GCP catalog (the service_name in the SKU JSON is "Networking", not
+        # "Cloud Armor"). Without this alias, resolve_sku("Cloud Armor", ...)
+        # falls through with no service_id and returns None for every WAF row.
+        "Cloud Armor": "Networking",
     }
     services = _load_services()
     service_id = services.get(gcp_service) or services.get(_CATALOG_SERVICE_ALIASES.get(gcp_service, ""))
@@ -1170,16 +1283,72 @@ def lookup_sku_in_catalog(gcp_service, desc_pattern, gcp_region):
     return None, None, None
 
 
+_TOKEN_CACHE = None
+_TOKEN_CACHE_SET = False
+
+
 def _gcp_token():
-    """Return (kind, value) auth token, or None."""
+    """Return (kind, value) auth token, or None.
+
+    Cached for the remainder of this process — a live job can hit this once
+    per missing SKU, and re-running the `gcloud auth print-access-token`
+    subprocess (and its own real startup cost) that many times for a value
+    that can't change mid-run is pure waste, on top of the per-call timeout
+    below. `_TOKEN_CACHE_SET` (not `_TOKEN_CACHE is not None`) distinguishes
+    "genuinely no credentials available" from "not checked yet" so a real
+    negative is cached too, not re-attempted on every subsequent miss.
+    """
+    global _TOKEN_CACHE, _TOKEN_CACHE_SET
+    if _TOKEN_CACHE_SET:
+        return _TOKEN_CACHE
+    _TOKEN_CACHE_SET = True
+    _TOKEN_CACHE = _gcp_token_uncached()
+    return _TOKEN_CACHE
+
+
+def _gcp_token_uncached():
     import subprocess
+    import shutil
     api_key = os.environ.get("GOOGLE_CLOUD_API_KEY") or os.environ.get("GCP_API_KEY")
     if api_key:
         return ("key", api_key)
     try:
-        import urllib.request as _req
+        # subprocess.check_output(["gcloud", ...]) fails on Windows even when
+        # gcloud is on PATH and the user is logged in — confirmed real bug:
+        # the installed binary is "gcloud.cmd" (a batch shim), and Windows'
+        # CreateProcess (what the list-argument form of subprocess uses) does
+        # NOT search PATHEXT for a bare "gcloud" the way a shell would, so it
+        # raises FileNotFoundError even with a valid PATH entry — silently
+        # falling through to "no credentials found" and disabling the live
+        # API fallback entirely on every Windows dev machine. shutil.which()
+        # performs the same PATHEXT-aware search a shell does, so it resolves
+        # to the real "gcloud.cmd" path CreateProcess can actually launch.
+        #
+        # Opt-in only (AGY_ALLOW_GCLOUD_LIVE_FETCH=1), NOT attempted by
+        # default. Confirmed real, severe bug this works around: a
+        # `timeout=` on subprocess.check_output does NOT reliably bound this
+        # call on Windows — gcloud.cmd is a batch shim that spawns its own
+        # child process (Java/Python), and Python's subprocess timeout only
+        # reliably kills the immediate cmd.exe shell it launched, not that
+        # grandchild; if the grandchild keeps the pipe open, communicate()
+        # can hang well past the requested timeout (verified directly: a
+        # timeout=10 call here ran past 120s with no return). A live job
+        # that hits this for even one missing SKU can stall indefinitely
+        # with no way to tell it apart from genuine progress — far worse
+        # than just skipping the live-catalog lookup and passing the row
+        # through. GOOGLE_CLOUD_API_KEY/GCP_API_KEY (checked above, a plain
+        # HTTP call with a real bounded timeout, no subprocess) remains the
+        # safe way to opt into live lookups; this gcloud path is now an
+        # explicit opt-in for anyone who has verified it doesn't hang on
+        # their machine, not the default for everyone.
+        if os.environ.get("AGY_ALLOW_GCLOUD_LIVE_FETCH") != "1":
+            return None
+        gcloud_bin = shutil.which("gcloud")
+        if not gcloud_bin:
+            return None
         tok = subprocess.check_output(
-            ["gcloud", "auth", "print-access-token"], text=True, stderr=subprocess.DEVNULL
+            [gcloud_bin, "auth", "print-access-token"], text=True, stderr=subprocess.DEVNULL,
+            timeout=10,
         ).strip()
         if tok:
             return ("bearer", tok)
@@ -1188,23 +1357,35 @@ def _gcp_token():
     return None
 
 
-def _live_sku_fetch(gcp_service, desc_pattern, gcp_region):
-    """Last-resort live fetch from GCP Cloud Billing Catalog API. Append result to cache."""
+_LIVE_SKU_LIST_CACHE = {}  # svc_id -> list[sku dict], or None for a fetch that failed
+
+
+def _live_sku_list(svc_id):
+    """Fetch (and cache, for the remainder of this process) every SKU for
+    one GCP service from the live Cloud Billing Catalog API, across all
+    pages.
+
+    Confirmed real bug this fixes: _live_sku_fetch() used to run this full
+    paginated fetch fresh for EVERY (service, desc_pattern, region) miss —
+    a bill with several uncatalogued SKUs for the same service (e.g.
+    multiple Compute Engine storage SKUs) repeated the entire multi-page
+    fetch once per missing SKU instead of once per service, multiplying an
+    already-slow live-API path by however many distinct SKUs were missing.
+    Caching the raw page results here means the regex/region filtering in
+    _live_sku_fetch() below can just re-scan the same in-memory list.
+    """
+    if svc_id in _LIVE_SKU_LIST_CACHE:
+        return _LIVE_SKU_LIST_CACHE[svc_id]
+
     import urllib.request, urllib.parse
-    services_file = os.path.join(DATA_DIR, "services.json")
-    if not os.path.exists(services_file):
-        return None
-    with open(services_file) as f:
-        svc_map = {s["displayName"]: s["serviceId"] for s in json.load(f)}
-    svc_id = svc_map.get(gcp_service)
-    if not svc_id:
-        return None
 
     token_info = _gcp_token()
     if not token_info:
+        _LIVE_SKU_LIST_CACHE[svc_id] = None
         return None
-
     kind, value = token_info
+
+    skus = []
     page_token = ""
     while True:
         url = f"https://cloudbilling.googleapis.com/v1/services/{svc_id}/skus?pageSize=5000"
@@ -1220,18 +1401,39 @@ def _live_sku_fetch(gcp_service, desc_pattern, gcp_region):
                 data = json.loads(r.read())
         except Exception as e:
             print(f"  live fetch failed: {e}")
+            _LIVE_SKU_LIST_CACHE[svc_id] = None
             return None
 
-        for sku in data.get("skus", []):
-            if not re.search(desc_pattern, sku.get("description", ""), re.IGNORECASE):
-                continue
-            geo = sku.get("geoTaxonomy", {})
-            if geo.get("type") == "GLOBAL" or gcp_region in sku.get("serviceRegions", []):
-                return sku["skuId"]
-
+        skus.extend(data.get("skus", []))
         page_token = data.get("nextPageToken", "")
         if not page_token:
             break
+
+    _LIVE_SKU_LIST_CACHE[svc_id] = skus
+    return skus
+
+
+def _live_sku_fetch(gcp_service, desc_pattern, gcp_region):
+    """Last-resort live fetch from GCP Cloud Billing Catalog API. Append result to cache."""
+    services_file = os.path.join(DATA_DIR, "services.json")
+    if not os.path.exists(services_file):
+        return None
+    with open(services_file) as f:
+        svc_map = {s["displayName"]: s["serviceId"] for s in json.load(f)}
+    svc_id = svc_map.get(gcp_service)
+    if not svc_id:
+        return None
+
+    skus = _live_sku_list(svc_id)
+    if skus is None:
+        return None
+
+    for sku in skus:
+        if not re.search(desc_pattern, sku.get("description", ""), re.IGNORECASE):
+            continue
+        geo = sku.get("geoTaxonomy", {})
+        if geo.get("type") == "GLOBAL" or gcp_region in sku.get("serviceRegions", []):
+            return sku["skuId"]
     return None
 
 
@@ -1370,6 +1572,28 @@ def _strict_resolve_sku(gcp_service, desc_pattern, gcp_region):
     return resolve_sku(gcp_service, desc_pattern, gcp_region)
 
 
+def resolve_sku_with_fallback(candidates, gcp_region):
+    """Try each (gcp_service, desc_pattern, display_name) in order (cheapest first)
+    until one resolves in gcp_region.  Returns:
+        (sku_id, display_name, fallback_used, original_display_name)
+    where fallback_used is True when the first candidate failed and a later one
+    was substituted.  If no candidate resolves, returns (None, original, False, original)
+    — the caller should set strategy='passthrough' or emit a no-rate note.
+
+    Use this wherever a single resolve_sku() call is made and there is a known
+    ordered list of cheaper-to-more-expensive equivalents (e.g. GCS storage
+    classes: Archive → Coldline → Nearline → Standard).
+    """
+    if not candidates:
+        return None, None, False, None
+    original_name = candidates[0][2]
+    for idx, (gcp_service, desc_pattern, display_name) in enumerate(candidates):
+        sku_id = resolve_sku(gcp_service, desc_pattern, gcp_region)
+        if sku_id:
+            return sku_id, display_name, idx > 0, original_name
+    return None, original_name, False, original_name
+
+
 def _catalog_version():
     """Cached fetched_at timestamp from data/CATALOG_META.json, or '' if absent.
     Used to version-tag cached SKU-resolution misses so they invalidate on
@@ -1396,6 +1620,48 @@ def _match(usage_type, product, table, operation=None):
     return None
 
 
+# GCS storage-class fallback chains ordered cheapest → most expensive.
+# Each entry is (gcp_service, desc_pattern, display_name).
+# Used by resolve_sku_with_fallback() so that if Archive isn't in the catalog
+# for the target region, the mapper automatically tries Coldline, then Nearline,
+# then Standard, rather than silently emitting a map row with no SKU ID.
+_GCS_CLASS_FALLBACKS = {
+    GCS_ARCHIVE:  [
+        (GCP_CLOUD_STORAGE, GCS_ARCHIVE,  GCS_ARCHIVE),
+        (GCP_CLOUD_STORAGE, GCS_COLDLINE, GCS_COLDLINE),
+        (GCP_CLOUD_STORAGE, GCS_NEARLINE, GCS_NEARLINE),
+        (GCP_CLOUD_STORAGE, GCS_STANDARD, GCS_STANDARD),
+    ],
+    GCS_COLDLINE: [
+        (GCP_CLOUD_STORAGE, GCS_COLDLINE, GCS_COLDLINE),
+        (GCP_CLOUD_STORAGE, GCS_NEARLINE, GCS_NEARLINE),
+        (GCP_CLOUD_STORAGE, GCS_STANDARD, GCS_STANDARD),
+    ],
+    GCS_NEARLINE: [
+        (GCP_CLOUD_STORAGE, GCS_NEARLINE, GCS_NEARLINE),
+        (GCP_CLOUD_STORAGE, GCS_STANDARD, GCS_STANDARD),
+    ],
+    GCS_STANDARD: [
+        (GCP_CLOUD_STORAGE, GCS_STANDARD, GCS_STANDARD),
+    ],
+}
+
+
+# Caveats appended to projection_note for cold storage classes.
+# Retrieval fees are separate line items — not included in storage cost.
+_S3_COLD_CLASS_CAVEAT = {
+    GCS_COLDLINE: (
+        " [retrieval fee: GCP Coldline $0.05/GiB retrieved — check if retrieval "
+        "volume is significant; 90-day minimum storage duration applies]"
+    ),
+    GCS_ARCHIVE: (
+        " [retrieval fee: GCP Archive $0.05/GiB retrieved (vs AWS Glacier ~$0.0025-0.03/GB) "
+        "— flag if workload retrieves frequently; 365-day minimum storage duration "
+        "(AWS Glacier Flexible/Deep Archive minimum is shorter — verify data lifecycle)]"
+    ),
+}
+
+
 def map_object_storage(rows):
     """Map S3 storage rows to GCS.
 
@@ -1413,6 +1679,29 @@ def map_object_storage(rows):
     for r in rows:
         gcp_region = r.get("gcp_region")
         usage_type_lower = (r.get("usage_type") or "").lower()
+
+        # Infer gcp_region from a usage_type/product region-prefix when ingest
+        # left it as 'global'/blank — the same defensive fallback every other
+        # static mapper already has (map_block_storage, map_msk, map_flat_hourly).
+        # Without it, a PDF/simplified-CUR S3 row (blank aws_region/usage_type,
+        # region only embedded as a prefix on `product`, e.g. "Amazon Simple
+        # Storage Service EUW3-TimedStorage-ByteHrs") rides through unpriced-region
+        # all the way to the report still tagged "global" — this mapper was the
+        # one place that pattern wasn't caught, even though _s3_extract_code_from_
+        # product() already strips this exact prefix off (it just discarded it
+        # instead of resolving it).
+        if not gcp_region or gcp_region == "global":
+            m = _UT_PREFIX_RE.match(r.get("usage_type") or "")
+            if not m:
+                # _s3_extract_code_from_product() strips this same prefix off
+                # before returning, so match against the pre-strip product text
+                # (S3 service name removed) instead of calling it here.
+                m = _UT_PREFIX_RE.match(
+                    re.sub(r'^amazon\s+simple\s+storage\s+service\s*', '',
+                           (r.get("product") or "").strip(), flags=re.IGNORECASE)
+                )
+            if m:
+                gcp_region = _UT_PREFIX_TO_GCP.get(m.group(1).lower(), gcp_region)
 
         # ── Pass 1: structured usage_type code lookup ────────────────────────
         result = _s3_route_usage_type(usage_type_lower)
@@ -1448,18 +1737,30 @@ def map_object_storage(rows):
                     "mapping_confidence": 0.40,
                 })
             else:
-                # Known storage class — resolve SKU directly to avoid word-overlap errors
-                sku_id = resolve_sku(GCP_CLOUD_STORAGE, result, gcp_region)
+                # Known storage class — resolve SKU with fallback chain so that
+                # if Archive/Coldline isn't available in this region we automatically
+                # step up to the next cheapest available class instead of emitting
+                # a map row with no SKU ID.
+                candidates = _GCS_CLASS_FALLBACKS.get(result, [(GCP_CLOUD_STORAGE, result, result)])
+                sku_id, resolved_name, fell_back, orig_name = resolve_sku_with_fallback(candidates, gcp_region)
+                sku_name = resolved_name or result
+                note = f"S3 usage_type routing → {sku_name}"
+                if fell_back:
+                    note = (f"S3 usage_type routing → {orig_name} "
+                            f"(not available in {gcp_region}; using {sku_name} as next available class)")
+                note += _S3_COLD_CLASS_CAVEAT.get(sku_name, "")
                 entry = {
                     "aws_li_key":         r["aws_li_key"],
                     "gcp_service":        GCP_CLOUD_STORAGE,
-                    "gcp_sku_name":       result,
+                    "gcp_sku_name":       sku_name,
                     "component":          "storage",
                     "strategy":           "map",
-                    "unit_multiplier":    1.0 / 1.024,  # AWS decimal GB-Mo → GCP binary GiBy.mo
+                    # 1 GiB = 1.074 GB → ÷1.074 converts AWS decimal GB-Mo to GCP binary GiBy-Mo.
+                    # (1/1.024 was wrong — that is the MiB/MB ratio, not GiB/GB.)
+                    "unit_multiplier":    1.0 / 1.074,
                     "gcp_region":         gcp_region,
-                    "projection_note":    f"S3 usage_type routing → {result}",
-                    "mapping_confidence": 0.95,
+                    "projection_note":    note,
+                    "mapping_confidence": 0.90 if fell_back else 0.95,
                 }
                 if sku_id:
                     entry["gcp_sku_id"] = sku_id
@@ -1496,13 +1797,21 @@ def map_object_storage(rows):
                             "mapping_confidence": 0.40,
                         })
                     else:
-                        sku_id = resolve_sku(GCP_CLOUD_STORAGE, _r, gcp_region)
+                        candidates = _GCS_CLASS_FALLBACKS.get(_r, [(GCP_CLOUD_STORAGE, _r, _r)])
+                        sku_id, resolved_name, fell_back, orig_name = resolve_sku_with_fallback(candidates, gcp_region)
+                        sku_name = resolved_name or _r
+                        note = f"S3 product-code routing → {sku_name} (extracted from product)"
+                        if fell_back:
+                            note = (f"S3 product-code routing → {orig_name} "
+                                    f"(not available in {gcp_region}; using {sku_name}) (extracted from product)")
+                        note += _S3_COLD_CLASS_CAVEAT.get(sku_name, "")
                         entry = {
                             "aws_li_key": r["aws_li_key"], "gcp_service": GCP_CLOUD_STORAGE,
-                            "gcp_sku_name": _r, "component": "storage", "strategy": "map",
-                            "unit_multiplier": 1.0 / 1.024, "gcp_region": gcp_region,  # AWS decimal GB → GCP GiBy
-                            "projection_note": f"S3 product-code routing → {_r} (extracted from product)",
-                            "mapping_confidence": 0.90,
+                            "gcp_sku_name": sku_name, "component": "storage", "strategy": "map",
+                            "unit_multiplier": 1.0 / 1.074,
+                            "gcp_region": gcp_region,
+                            "projection_note": note,
+                            "mapping_confidence": 0.85 if fell_back else 0.90,
                         }
                         if sku_id:
                             entry["gcp_sku_id"] = sku_id
@@ -1541,17 +1850,24 @@ def map_object_storage(rows):
                     "mapping_confidence": 0.40,
                 })
             else:
-                sku_id = resolve_sku(GCP_CLOUD_STORAGE, result_blob, gcp_region)
+                candidates = _GCS_CLASS_FALLBACKS.get(result_blob, [(GCP_CLOUD_STORAGE, result_blob, result_blob)])
+                sku_id, resolved_name, fell_back, orig_name = resolve_sku_with_fallback(candidates, gcp_region)
+                sku_name = resolved_name or result_blob
+                note = f"S3 blob fallback → {sku_name}"
+                if fell_back:
+                    note = (f"S3 blob fallback → {orig_name} "
+                            f"(not available in {gcp_region}; using {sku_name})")
+                note += _S3_COLD_CLASS_CAVEAT.get(sku_name, "")
                 entry = {
                     "aws_li_key":         r["aws_li_key"],
                     "gcp_service":        GCP_CLOUD_STORAGE,
-                    "gcp_sku_name":       result_blob,
+                    "gcp_sku_name":       sku_name,
                     "component":          "storage",
                     "strategy":           "map",
-                    "unit_multiplier":    1.0 / 1.024,  # AWS decimal GB-Mo → GCP binary GiBy.mo
+                    "unit_multiplier":    1.0 / 1.074,
                     "gcp_region":         gcp_region,
-                    "projection_note":    f"S3 blob fallback → {result_blob}",
-                    "mapping_confidence": 0.75,
+                    "projection_note":    note,
+                    "mapping_confidence": 0.70 if fell_back else 0.75,
                 }
                 if sku_id:
                     entry["gcp_sku_id"] = sku_id
@@ -1588,7 +1904,11 @@ _FLAT_HOURLY_APPROXIMATE_NOTE = {
     "Application Load Balancer Forwarding Rule Minimum":
         " [estimate: ALB LCU-hours bundle connections+bandwidth+rule-evals into one AWS meter; "
         "GCP prices forwarding rules and data processing separately — this SKU covers the base "
-        "forwarding-rule charge only, not the full LCU bundle]",
+        "forwarding-rule charge only, not the full LCU bundle. "
+        "IMPORTANT: the forwarding-rule base charge shown here may already exceed the AWS ALB-hour "
+        "rate in this region; GCP data-processing (~$0.008/GiB) and rule-evaluation charges are "
+        "NOT captured in this line — treat the GCP figure as a lower bound, actual GCP ALB cost "
+        "will be higher]",
     "Passthrough Network Load Balancer Forwarding Rule":
         " [estimate: NLB LCU-hours bundle connections+bandwidth into one AWS meter; "
         "GCP prices forwarding rules and data processing separately — this SKU covers the base "
@@ -1598,6 +1918,16 @@ _FLAT_HOURLY_APPROXIMATE_NOTE = {
 
 def map_flat_hourly(rows):
     out = []
+    # AWS bills Bot Control managed-rule-group enablement, Fraud Control, and
+    # Anti-DDoS each as their OWN fixed monthly fee (separate CUR line items).
+    # GCP bundles all of that Enterprise-tier functionality behind a SINGLE
+    # account-level enrollment fee (real SKU, confirmed: "Cloud Armor Enterprise
+    # Paygo: Enrollment", $200/mo flat). Pricing every AWS row at the full $200
+    # would multiply the same real-world charge N times for one bill — this flag
+    # ensures only the first such row on a bill carries the $200, and any others
+    # are zeroed with a note pointing at it, same dedup shape as passthrough_rank
+    # in projection_view.py for multi-component passthrough rows.
+    enterprise_enrollment_priced = False
     for r in rows:
         # AWS WAF WebACL/Rule fixed fees — dedicated branch (not a plain
         # FLAT_HOURLY_MAP entry) because total_usage's real unit varies by
@@ -1633,6 +1963,64 @@ def map_flat_hourly(rows):
                                      f"{'already month-denominated' if already_in_months else 'raw hours, converted via /730'})"),
                 "mapping_confidence": 0.80,
             })
+            continue
+
+        # AWS WAF Bot Control managed-rule-group / Fraud Control / Anti-DDoS fixed
+        # monthly fees — these enable Enterprise-tier protection, which on GCP is
+        # gated behind the Cloud Armor Enterprise Paygo enrollment fee (see the
+        # GCP_CLOUD_ARMOR_ENTERPRISE_ENROLLMENT constant above). NOT the same AWS
+        # line items as WebACL/Rule (handled above) or the per-request Bot
+        # Control/Anti-DDoS charges (handled in map_per_request — those get a
+        # per-request Cloud Armor evaluation rate, a separate real charge).
+        is_waf_enterprise_feature = bool(re.search(
+            r"Bot Control managed rule group|AMR-BotControl(?!-Targeted)(?!.*Request)|"
+            r"AMR-AntiDDoS(?!.*Request)|Fraud Control managed rule group|AMR-FraudControl(?!.*Request)",
+            waf_blob, re.IGNORECASE
+        )) and not (is_webacl or is_waf_rule)
+        if is_waf_enterprise_feature:
+            gcp_region = r.get("gcp_region") or "global"
+            already_in_months = bool(re.search(r"\bMonth\b", waf_blob, re.IGNORECASE))
+            mult = 1.0 if already_in_months else (1.0 / 730.0)
+            if not enterprise_enrollment_priced:
+                sku_id = resolve_sku("Networking", GCP_CLOUD_ARMOR_ENTERPRISE_ENROLLMENT, gcp_region)
+                out.append({
+                    "aws_li_key":       r["aws_li_key"],
+                    "gcp_service":      "Networking",
+                    "gcp_sku_id":       sku_id if sku_id else None,
+                    "gcp_sku_name":     GCP_CLOUD_ARMOR_ENTERPRISE_ENROLLMENT,
+                    "component":        "hourly",
+                    "strategy":         "map" if sku_id else "passthrough",
+                    "unit_multiplier":  mult,
+                    "gcp_region":       gcp_region,
+                    "projection_note":  (
+                        "AWS WAF Bot Control/Fraud Control/Anti-DDoS managed-rule "
+                        "enablement fee -> Cloud Armor Enterprise Paygo enrollment "
+                        "($200/mo flat, real SKU). This is ONE account-level fee that "
+                        "covers all such Enterprise-tier features combined -- priced "
+                        "once here; any other Bot Control/Fraud Control/Anti-DDoS "
+                        "fixed-fee rows on this bill are zeroed to avoid counting the "
+                        "same $200/mo enrollment multiple times."
+                    ),
+                    "mapping_confidence": 0.65,
+                })
+                if sku_id:
+                    enterprise_enrollment_priced = True
+            else:
+                out.append({
+                    "aws_li_key":       r["aws_li_key"],
+                    "gcp_service":      "Networking",
+                    "gcp_sku_name":     None,
+                    "component":        "hourly",
+                    "strategy":         "ignore",
+                    "unit_multiplier":  0.0,
+                    "gcp_region":       gcp_region,
+                    "projection_note":  (
+                        "Already covered by the $200/mo Cloud Armor Enterprise Paygo "
+                        "enrollment fee priced on another Bot Control/Fraud Control/"
+                        "Anti-DDoS row in this bill -- not a separate GCP charge."
+                    ),
+                    "mapping_confidence": 0.65,
+                })
             continue
 
         match = _match(r.get("usage_type"), r.get("product"), FLAT_HOURLY_MAP, r.get("operation"))
@@ -1728,6 +2116,36 @@ def map_per_request(rows):
     for r in rows:
         product = (r.get("product") or "").lower()
         gcp_region = r.get("gcp_region")
+
+        # CloudFront Origin Shield — per-request fee for requests passing through the
+        # intermediate caching tier between edge PoPs and the origin.
+        # CRITICAL DISAMBIGUATION: "Origin Shield" ≠ "AWS Shield" (DDoS protection).
+        # "OriginShield" under CloudFront = CDN caching tier → $0 on GCP.
+        # "AWS Shield Standard/Advanced" = security product → maps to Cloud Armor (elsewhere).
+        # GCP Cloud CDN has no separate Origin Shield tier or charge — Google's
+        # network backbone consolidates PoP-to-origin traffic without billing it separately.
+        # This line item therefore maps to $0 (strategy='ignore') on GCP.
+        # The forwarding savings are already captured in the Cloud CDN bandwidth mapping.
+        _os_blob = f"{product} {(r.get('usage_type') or '').lower()} {(r.get('operation') or '').lower()}"
+        if "cloudfront" in product and re.search(r"origin.?shield|originshield", _os_blob):
+            out.append({
+                "aws_li_key":         r["aws_li_key"],
+                "gcp_service":        "Cloud CDN",
+                "gcp_sku_id":         None,
+                "gcp_sku_name":       None,
+                "component":          "requests",
+                "strategy":           "ignore",
+                "unit_multiplier":    0.0,
+                "gcp_region":         gcp_region,
+                "projection_note":    (
+                    "CloudFront Origin Shield (CDN caching tier, not AWS Shield DDoS) → "
+                    "$0 on GCP: Cloud CDN has no separate Origin Shield charge; "
+                    "Google's network backbone consolidates PoP-to-origin traffic without "
+                    "billing it separately — 100% savings on this line item"
+                ),
+                "mapping_confidence": 0.95,
+            })
+            continue
 
         # Fargate vCPU-Hours / GB-Hours → GKE Autopilot pod resources.
         # Fargate is per-task (vCPU + memory billed separately). GKE Autopilot is the
@@ -1914,7 +2332,7 @@ def map_per_request(rows):
                 # chose Fargate may have specifically wanted to avoid
                 # managing nodes.
                 ce_arch = ("arm",) if is_arm else ("x86",)
-                ce_default = "C4A Arm" if is_arm else "N2D AMD"
+                ce_default = "C4A Arm" if is_arm else "N4D"
                 vcpu_arg, ram_arg = (1.0, 0.0) if component == "vcpu" else (0.0, 1.0)
                 ce_label, ce_core, ce_ram, _, _ = cheapest_in_scope(
                     ce_default, vcpu_arg, ram_arg, gcp_region, archs=ce_arch, tiers=("sustained",),
@@ -1970,7 +2388,7 @@ def map_per_request(rows):
                     # used everywhere else rather than dead-ending here.
                     vcpu_arg, ram_arg = (1.0, 0.0) if component == "vcpu" else (0.0, 1.0)
                     _label, core_desc, ram_desc, _sw, _reason = cheapest_in_scope(
-                        "N2D AMD", vcpu_arg, ram_arg, gcp_region, archs=("x86",), tiers=("sustained",))
+                        "N4D", vcpu_arg, ram_arg, gcp_region, archs=("x86",), tiers=("sustained",))
                     gce_desc = core_desc if component == "vcpu" else ram_desc
                     fallback_sku = _strict_resolve_sku(GCP_COMPUTE_ENGINE, gce_desc, gcp_region)
 
@@ -1992,8 +2410,9 @@ def map_per_request(rows):
                     # resolve_sku actually found a rate, which misrepresented a raw
                     # AWS-cost carry-forward as if it were a priced GCP estimate.
                     note = (f"Fargate → GKE Autopilot: no Autopilot pod SKU (Arm or x86) found in "
-                            f"{gcp_region}, and no Compute Engine fallback rate either — AWS cost "
-                            f"carried through unpriced, NOT a GCP cost estimate")
+                            f"{gcp_region}, and no Compute Engine fallback rate either — carried "
+                            f"through at AWS cost as a placeholder pending a real rate; treat this "
+                            f"row's GCP figure as unverified, not a priced estimate")
                     confidence = 0.3
 
             strategy = "map" if sku_id else "passthrough"
@@ -2012,8 +2431,12 @@ def map_per_request(rows):
             continue
 
         # S3 per-request charges → GCS Class A / Class B Operations.
-        # S3 Tier 1 (PUT/COPY/POST/LIST) = $0.005/1,000 ≈ GCS Class A $0.005/1,000
-        # S3 Tier 2 (GET/HEAD/others)    = $0.004/10,000 ≈ GCS Class B $0.004/10,000
+        # S3 Tier 1 (PUT/COPY/POST/LIST) = $0.005/1,000  ≈ GCS Class A $0.005/1,000 (all storage classes)
+        # S3 Tier 2 (GET/HEAD/others):
+        #   Standard/IA         → GCS Standard Class B $0.004/10k  (parity)
+        #   Glacier Instant (GIR) → GCS Coldline Class B $0.05/10k  (AWS charges a 25× premium vs
+        #                           GCS standard reads; Coldline is the correct tier, not Standard)
+        #   Glacier Flexible/Deep → GCS Archive  Class B $0.10/10k  (parity with AWS rate)
         # Unit is raw request count on both sides; unit_multiplier=1.0.
         # Lifecycle, replication, and bucket-level charges have no GCS equivalent — passthrough.
         # NB: do NOT use bare "s3" — it false-matches region codes like "APS3"
@@ -2047,11 +2470,30 @@ def map_per_request(rows):
                     "S3 Tier1 requests → GCS Class A Operations ($0.005/1k, parity)", 0.88
                 )
             elif re.search(r"tier2|get|head|select", blob):
-                # Tier 2 (read) → GCS Class B Operations (same per-10k price)
-                strat, sku_desc, note, conf = (
-                    "map", "Regional Standard Class B Operations",
-                    "S3 Tier2 requests → GCS Class B Operations ($0.004/10k, parity)", 0.88
-                )
+                # Tier 2 (read) — storage-class-aware Class B routing.
+                # GCS Class B rate depends on the storage class of the bucket; using
+                # Standard ($0.004/10k) for cold-tier GETs is a 12–25× underestimate.
+                if re.search(r"\bgir\b|glacier.?instant", blob):
+                    # Glacier Instant Retrieval GET → GCS Coldline Class B ($0.05/10k)
+                    # AWS charges $0.1/10k for GIR GETs (10× premium over Standard);
+                    # GCS Coldline is the equivalent cold/ms-retrieval tier at $0.05/10k.
+                    strat, sku_desc, note, conf = (
+                        "map", "Regional Coldline Class B Operations",
+                        "S3 Glacier Instant Retrieval GET → GCS Coldline Class B Operations"
+                        " ($0.05/10k; GCS is 2× cheaper than AWS's $0.1/10k retrieval premium)", 0.85
+                    )
+                elif re.search(r"glacier|deeparchive|gda\b", blob):
+                    # Glacier Flexible / Deep Archive GET → GCS Archive Class B ($0.10/10k, parity)
+                    strat, sku_desc, note, conf = (
+                        "map", "Regional Archive Class B Operations",
+                        "S3 Glacier GET → GCS Archive Class B Operations ($0.10/10k, parity)", 0.85
+                    )
+                else:
+                    # Standard S3 / IA GET → GCS Standard Class B ($0.004/10k, parity)
+                    strat, sku_desc, note, conf = (
+                        "map", "Regional Standard Class B Operations",
+                        "S3 Tier2 requests → GCS Class B Operations ($0.004/10k, parity)", 0.88
+                    )
             else:
                 strat, sku_desc, note, conf = (
                     "passthrough", None,
@@ -2073,6 +2515,39 @@ def map_per_request(rows):
             })
             continue
         else:
+            # CloudFront per-HTTPS-request charges have no GCP equivalent: Cloud CDN
+            # bills only for cache egress (data transfer), not per request. Setting
+            # strategy=ignore shows the real $0 GCP cost for this line item.
+            #
+            # The "cloudfront" signal must come from `product` alone, not the whole
+            # blob — confirmed real bug: AWS WAF's own operation text for a
+            # CloudFront-scoped WebACL literally reads "...Request Processed in
+            # CloudFront" (e.g. "AWS WAF Global-AMR-AntiDDoS-Request", $21.37),
+            # which matched this branch's old combined-blob check and got silently
+            # ignored as a CloudFront request charge — when it's actually a WAF
+            # per-request charge that belongs on the Cloud Armor Requests mapping
+            # below, same as its sibling WAF per-request rows (BotControl-Targeted-
+            # Request, RequestV2-Tier1) correctly are.
+            _cf_req_blob = f"{r.get('usage_type') or ''} {r.get('operation') or ''}".lower()
+            if "cloudfront" in (r.get("product") or "").lower() and re.search(
+                r"requests?|tier.*https?|https?.*tier|invalidat", _cf_req_blob
+            ):
+                out.append({
+                    "aws_li_key":         r["aws_li_key"],
+                    "gcp_service":        "Cloud CDN",
+                    "gcp_sku_id":         None,
+                    "gcp_sku_name":       None,
+                    "component":          "requests",
+                    "strategy":           "ignore",
+                    "unit_multiplier":    0.0,
+                    "gcp_region":         r.get("gcp_region"),
+                    "projection_note":    (
+                        "CloudFront per-HTTPS-request charge → $0 on GCP "
+                        "(Cloud CDN bills data transfer only, no per-request fee)"
+                    ),
+                    "mapping_confidence": 0.90,
+                })
+                continue
             match = _match(r.get("usage_type"), r.get("product"), PER_REQUEST_MAP)
             if match:
                 service, sku_name, mult = match
@@ -2095,7 +2570,26 @@ def map_per_request(rows):
                     # (the AWS bill mentioning these specific AWS feature
                     # names) is actually present.
                     waf_blob = f"{r.get('product') or ''} {r.get('usage_type') or ''} {r.get('operation') or ''}".lower()
-                    if re.search(r"botcontrol|bot control|fraudcontrol|fraud control", waf_blob):
+                    if re.search(r"botcontrol.targeted|bot.control.targeted", waf_blob):
+                        # Bot Control Targeted → Cloud Armor Security Policy Request Evaluation
+                        # (ML-based Adaptive Protection for bot detection included at the
+                        # standard per-request rate). AWS $10/M vs GCP ~$0.75/M — GCP is
+                        # ~13x cheaper for infrastructure-layer bot detection.
+                        # NOTE: reCAPTCHA Enterprise ($1/1,000 = $1,000/M) is a DIFFERENT
+                        # product — it handles CAPTCHA challenge flows, not infrastructure
+                        # WAF bot detection. These are not substitutes for this line item.
+                        # If the application also presents CAPTCHA challenges, reCAPTCHA
+                        # Enterprise costs apply separately.
+                        note += (
+                            " [WAF Bot Control Targeted → Cloud Armor request evaluation "
+                            "with Adaptive Protection ML bot detection; AWS $10/M vs GCP "
+                            "~$0.75/M — GCP ~13x cheaper for infrastructure-layer bot "
+                            "blocking. Note: reCAPTCHA Enterprise ($1/1,000) is a separate "
+                            "CAPTCHA-challenge product and does NOT apply to this line item "
+                            "unless the app explicitly issues challenge tokens to end users]"
+                        )
+                        confidence = 0.72
+                    elif re.search(r"botcontrol|bot control|fraudcontrol|fraud control", waf_blob):
                         note += (" [architecture review recommended: this bill shows AWS WAF Bot "
                                  "Control/Fraud Control usage — the equivalent Cloud Armor bot/fraud "
                                  "protection requires the Enterprise tier, which carries a substantial "
@@ -2110,9 +2604,17 @@ def map_per_request(rows):
                 strategy, confidence = "passthrough", 0.40
                 note = (f"per_request: no GCP equivalent found for "
                         f"product={r.get('product')!r} — passthrough at cost parity")
+        # Resolve the GCP SKU ID so merge_mappings can compute gcp_cost.
+        sku_id = None
+        if strategy == "map" and service and sku_name:
+            sku_meta = resolve_sku(service, sku_name, r.get("gcp_region"))
+            sku_id = sku_meta.sku_id if sku_meta else None
+            if not sku_id:
+                strategy = "passthrough"
         out.append({
             "aws_li_key":         r["aws_li_key"],
             "gcp_service":        service,
+            "gcp_sku_id":         sku_id,
             "gcp_sku_name":       sku_name,
             "component":          "requests",
             "strategy":           strategy,
@@ -2444,11 +2946,17 @@ def map_block_storage(rows):
         else:
             service = GCP_COMPUTE_ENGINE
             if is_snapshot:
-                # EBS snapshots are instant-restore (volumes clone from them immediately,
-                # data streams in background) — GCP Instant Snapshot has the same property.
-                # Standard PD Instant Snapshot ($0.044/GiBy.mo) vs Storage PD Snapshot
-                # ($0.061/GiBy.mo): cheaper AND better product match.
-                desc = "Standard PD Instant Snapshot data storage"
+                # A plain EBS snapshot (this branch) is AWS's default incremental,
+                # S3-backed snapshot — it is NOT instant-restore; that requires
+                # separately enabling and paying for AWS Fast Snapshot Restore,
+                # which bills as its own distinct line item, not this one. GCP's
+                # Instant Snapshot product line is the premium, locally-cached
+                # fast-restore tier and is the wrong product class for an
+                # ordinary archival snapshot. The correct, cheaper, product-
+                # matched target is GCP's regular (non-instant) PD snapshot,
+                # billed under the real catalog SKU "Regional Archive Snapshot
+                # Data Storage".
+                desc = "Regional Archive Snapshot Data Storage"
             elif vol in ("io1", "io2") and "block express" not in blob:
                 # io1 and standard io2 (non-"Block Express") cap at 64,000
                 # IOPS / 1,000 MB/s per volume — both well under Hyperdisk
@@ -2627,44 +3135,87 @@ def map_data_transfer(rows):
 
         # "lcu"/"loadbalancer-bytes" catches CUR-format usage_type tokens; PDF bills
         # spell this out in `operation` as "...capacity unit-hour (or partial hour)"
-        # with no "lcu" substring anywhere. Without this, the row fell through to
-        # the generic egress default below, which priced an LCU-hour COUNT at the
-        # per-GB internet-egress rate — a unit mismatch that inflated ALB/NLB LCU
-        # rows ~13-15x (classify_mechanics.py routes these here correctly already;
-        # this was the second half of that fix that got missed the first time).
+        # with no "lcu" substring anywhere.
         #
-        # That earlier fix corrected WHICH $/GB SKU gets targeted but never
-        # addressed the deeper unit mismatch: total_usage here is a raw LCU-Hrs
-        # COUNT (AWS's own composite meter — new-connections + active-connections
-        # + bandwidth + rule-evaluations bundled into ONE normalized unit), not a
-        # GB quantity. The real catalog SKU (confirmed via find-sku.sh) is
-        # genuinely priced $/GiBy — multiplying a non-GB count by that rate at
-        # unit_multiplier=1.0 conflates two different units with no basis for the
-        # 1:1 ratio, same bug shape as the confirmed Redshift RI and Hyperdisk
-        # Throughput unit-mismatch bugs (see CLAUDE.md history). Per that same
-        # principle: since there's no real per-row GB-processed figure to derive
-        # an honest multiplier from, this stays an honest passthrough rather than
-        # presenting a "map" result with fabricated precision. The sibling
-        # map_flat_hourly() ALB/NLB path already does this correctly for the
-        # separate flat per-hour LCU forwarding-rule charge, with a disclosed
-        # "[estimate: ...]" caveat — mirror that honesty here for the
-        # data-processing component too.
+        # LCU-hours CAN be mapped to GCP data-processing rates using the AWS
+        # approximation: 1 LCU-hr ≈ 1 GB processed when throughput (bytes) is the
+        # dominant LCU dimension — true for most HTTP web workloads. The bytes-to-LCU
+        # ratio holds because AWS defines 1 LCU as the MAX of {1 GB/min, 25 new-conn/s,
+        # 3000 active-conn, 1000 rule-evals}, and bandwidth dominates for typical HTTP
+        # traffic. unit_multiplier = 1/1.074 converts GB → GiB (GCP bills in GiB).
+        # AWS: $0.008/LCU-hr ≈ $0.008/GB. GCP: $0.008/GiB ≈ $0.00745/GB — GCP ~7%
+        # cheaper, same GiB/GB relationship as CloudWatch log ingestion.
+        # Flag: connection-heavy workloads (WebSockets, long-lived TCP) may have
+        # actual GB < LCU-hrs, making this an over-estimate of GCP cost.
         if "lcu" in ut or "loadbalancer-bytes" in ut or "capacity unit-hour" in ut:
-            entry = {
-                "aws_li_key":       r["aws_li_key"],
-                "gcp_service":      "Networking",
-                "gcp_sku_id":       None,
-                "gcp_sku_name":     None,
-                "component":        "transfer",
-                "strategy":         "passthrough",
-                "unit_multiplier":  1.0,
-                "gcp_region":       r.get("gcp_region"),
-                "projection_note":  ("Load Balancer Capacity Units (LCU-Hrs) → GCP data processing is billed "
-                                     "$/GiBy, but LCU-Hrs is AWS's own composite meter (connections+bandwidth+"
-                                     "rule-evals bundled) with no direct GB figure in the bill to convert from — "
-                                     "passthrough at AWS cost pending real bandwidth data"),
-                "mapping_confidence": 0.50,
-            }
+            lcu_blob = f"{ut} {product_lower} {op_lower}"
+            is_alb_lcu = bool(re.search(r"alb|application.{0,20}load.?balanc|loadbalancerusage.*application", lcu_blob))
+            is_nlb_lcu = bool(re.search(r"nlb|network.{0,20}load.?balanc|loadbalancerusage.*network", lcu_blob))
+
+            if is_alb_lcu:
+                # Real catalog description requires "Inbound" — confirmed via
+                # direct catalog scan: "Regional External Application Load
+                # Balancer Data Processing" (no direction word) matches no real
+                # SKU at all, forcing every ALB LCU row to passthrough despite
+                # a real, priced SKU existing. AWS's LCU-hour is a single
+                # blended metric with no inbound/outbound split; GCP prices
+                # each direction separately (and outbound is typically cheaper),
+                # so "Inbound" is the conservative (upper-bound) choice — same
+                # spirit as the LCU≈GB approximation already documented above.
+                lcu_sku_desc = r"Regional External Application Load Balancer Inbound Data Processing"
+                lcu_lb_label = "ALB"
+            elif is_nlb_lcu:
+                # Same missing-direction-word bug as ALB above — real catalog
+                # SKU is "...Network Load Balancer Inbound Data Processing".
+                lcu_sku_desc = r"Global External Passthrough Network Load Balancer Inbound Data Processing"
+                lcu_lb_label = "NLB"
+            else:
+                lcu_sku_desc = None
+                lcu_lb_label = None
+
+            if lcu_sku_desc:
+                _lcu_sku_id = resolve_sku("Networking", lcu_sku_desc, r.get("gcp_region"))
+                _lcu_sku_name = re.sub(r'[\\^$.*+?()[\]{}|]', '', lcu_sku_desc).strip()
+                _lcu_strategy = "map" if _lcu_sku_id else "passthrough"
+                # unit_multiplier = 1/1.074: treat 1 LCU-hr as 1 GB (bytes-dominant
+                # approximation), then convert GB → GiB for GCP's $/GiBy rate.
+                entry = {
+                    "aws_li_key":       r["aws_li_key"],
+                    "gcp_service":      "Networking",
+                    "gcp_sku_name":     _lcu_sku_name,
+                    "component":        "transfer",
+                    "strategy":         _lcu_strategy,
+                    "unit_multiplier":  1.0 / 1.074,
+                    "gcp_region":       r.get("gcp_region"),
+                    "projection_note":  (
+                        f"{lcu_lb_label} LCU-Hrs → {_lcu_sku_name} "
+                        f"[estimate: 1 LCU-hr ≈ 1 GB when bandwidth dominates (typical HTTP); "
+                        f"÷1.074 converts GB→GiB for GCP $/GiBy rate; AWS $0.008/LCU-hr ≈ GCP "
+                        f"$0.008/GiBy — near cost parity, GCP ~7% cheaper; "
+                        f"over-estimates GCP cost if workload is connection-heavy (WebSockets, long-lived TCP)]"
+                    ),
+                    "mapping_confidence": 0.65,
+                }
+                if _lcu_sku_id:
+                    entry["gcp_sku_id"] = _lcu_sku_id
+                    entry["gcp_sku_unit"] = _lcu_sku_id.unit
+            else:
+                # Can't identify ALB vs NLB — passthrough rather than guess wrong SKU.
+                entry = {
+                    "aws_li_key":       r["aws_li_key"],
+                    "gcp_service":      "Networking",
+                    "gcp_sku_id":       None,
+                    "gcp_sku_name":     None,
+                    "component":        "transfer",
+                    "strategy":         "passthrough",
+                    "unit_multiplier":  1.0,
+                    "gcp_region":       r.get("gcp_region"),
+                    "projection_note":  (
+                        "Load Balancer Capacity Units (LCU-Hrs) — could not identify ALB vs NLB "
+                        "from available fields; passthrough at AWS cost pending identification"
+                    ),
+                    "mapping_confidence": 0.45,
+                }
             out.append(entry)
             continue
 
@@ -2723,11 +3274,110 @@ def map_data_transfer(rows):
     return out
 
 
+def _cf_bw_bucket_from_desc(desc):
+    """Infer CloudFront destination bucket from free-text description (PDF bills).
+
+    PDF-ingested rows have NULL usage_type so _CF_BW_RE cannot be used. The
+    operation/description field carries the destination region as a parenthetical
+    or keyword. Returns one of the CDN_EGRESS_TIERS bucket keys.
+    """
+    d = desc.lower()
+    if any(x in d for x in ("india", "(in)", "aps3", "ap-south")):
+        return "apac"
+    if any(x in d for x in ("australia", "(au)", "ap-southeast-2")):
+        return "apac_au"
+    if any(x in d for x in ("china", "(cn)")):
+        return "china"
+    if any(x in d for x in ("europe", "(eu)", "eu-")):
+        return "emea"
+    # No explicit region label → assume US/Americas (most common CloudFront default)
+    return "americas"
+
+
+def _is_cf_bw_row(product, desc):
+    """True when a row looks like a CloudFront bandwidth row from a PDF bill."""
+    return "cloudfront" in product and (
+        "data transfer out" in desc or "datatransfer-out" in desc
+    )
+
+
 def map_non_workload(rows):
+    # Pre-pass: sum CloudFront bandwidth GB per destination bucket for correct
+    # GCP CDN tier placement. PDF-ingested rows land here (usage_type is NULL
+    # so _CF_BW_RE in map_data_transfer never fires). We detect them by
+    # description text and aggregate before the main loop.
+    _cf_bucket_totals = {}
+    for _r in rows:
+        _p = (_r.get("product") or "").lower()
+        _d = (_r.get("operation") or "").lower()
+        if not _is_cf_bw_row(_p, _d):
+            continue
+        _b = _cf_bw_bucket_from_desc(_d)
+        _cf_bucket_totals[_b] = (
+            _cf_bucket_totals.get(_b, 0.0) + float(_r.get("total_usage") or 0)
+        )
+
     out = []
     for r in rows:
         product = (r.get("product") or "").lower()
         desc = (r.get("operation") or "").lower()
+
+        # CloudFront bandwidth from PDF bill: usage_type is NULL so the regex
+        # in map_data_transfer didn't match and the row fell through to here.
+        # Map it properly to Cloud CDN Cache Egress using description-text region
+        # detection and the sibling-summed total for correct tier placement.
+        if _is_cf_bw_row(product, desc):
+            _bucket = _cf_bw_bucket_from_desc(desc)
+            _total_gb = _cf_bucket_totals.get(_bucket, float(r.get("total_usage") or 0))
+            _sku_id, _sku_name, _rate = cdn_egress_rate(_bucket, _total_gb)
+            out.append({
+                "aws_li_key":         r["aws_li_key"],
+                "gcp_service":        "Cloud CDN",
+                "gcp_sku_id":         _sku_id,
+                "gcp_sku_name":       _sku_name,
+                "component":          "transfer",
+                "strategy":           "map",
+                "unit_multiplier":    1.0,
+                "gcp_region":         r.get("gcp_region"),
+                "projection_note":    (
+                    f"CloudFront cache egress (PDF bill — usage_type blank, region inferred "
+                    f"from description) → {_sku_name} "
+                    f"(total monthly {_bucket} volume: {_total_gb:,.0f} GB → "
+                    f"${_rate:.4f}/GB tier; verify current GCP CDN rates at "
+                    f"cloud.google.com/cdn/pricing)"
+                ),
+                "mapping_confidence": 0.75,
+            })
+            continue
+
+        # EC2 burstable CPU credits (T2/T3/T3a/T4g): genuinely $0 on GCP, not
+        # cost-parity passthrough — no GCP burstable/general-purpose family
+        # (E2, T2A, N4D used as a burstable target) has a credit-billing
+        # concept at all, ever. Confirmed real bug this fixes: classify_
+        # mechanics.py's own comment already says these rows should be
+        # "ignore[d] rather than mismap[ped]", but this function fell
+        # through them into the generic passthrough-at-AWS-cost branch
+        # below regardless — carrying the full AWS charge onto the GCP
+        # side for a charge type GCP structurally cannot ever bill.
+        if re.search(r"CPUCredits?", f"{product} {desc}", re.IGNORECASE):
+            out.append({
+                "aws_li_key":         r["aws_li_key"],
+                "gcp_service":        "Compute Engine",
+                "gcp_sku_id":         None,
+                "gcp_sku_name":       None,
+                "component":          "cpu-credits",
+                "strategy":           "ignore",
+                "unit_multiplier":    0.0,
+                "gcp_region":         r.get("gcp_region"),
+                "projection_note":    (
+                    "AWS burstable-instance CPU credits → $0 on GCP: no GCP "
+                    "burstable/general-purpose family bills a separate CPU-credit "
+                    "charge (AWS-only billing concept, genuine migration saving)"
+                ),
+                "mapping_confidence": 0.95,
+            })
+            continue
+
         if "marketplace" in product or "marketplace" in desc:
             gcp_service = "AWS Marketplace (Passthrough)"
             note = "AWS Marketplace subscription — passthrough at cost parity; not core workload"
@@ -2737,7 +3387,7 @@ def map_non_workload(rows):
         else:
             gcp_service = "AWS Non-Workload (Passthrough)"
             note = "AWS Non-workload item — passthrough at cost parity"
-            
+
         out.append({
             "aws_li_key":         r["aws_li_key"],
             "gcp_service":        gcp_service,
@@ -2817,6 +3467,185 @@ def map_guardduty(rows):
             "projection_note":    note,
             "mapping_confidence": 0.60,
         })
+    return out
+
+
+def map_inspector(rows):
+    """Amazon Inspector → Security Command Center Premium passthrough.
+
+    Inspector bills per-resource-scanned per month (usage_type strings like
+    "Inspector-ECR-ImageScanning", "Inspector-EC2-Scanning", "Inspector-Lambda-
+    FunctionScanning" — one line per scanned asset type). SCC Premium bills
+    per-asset-under-management/mo across a different, broader asset inventory
+    model (not just scan targets). The two are the same *shape* (both roughly
+    per-resource/mo) but not the same *inventory* — Inspector's "resource" and
+    SCC's "asset" are counted differently enough (e.g. an ECR image scanned
+    once vs an asset continuously monitored) that inventing a 1:1 multiplier
+    would be fabricated precision. Same treatment as map_guardduty above:
+    honest passthrough with the correct GCP service label instead of an
+    invented rate.
+    """
+    out = []
+    for r in rows:
+        ut = (r.get("usage_type") or "").lower()
+        if re.search(r"ecr|image.?scan", ut):
+            note = ("Amazon Inspector (ECR image scanning) → Security Command Center Premium; "
+                    "pricing model differs (per-image-scanned/mo vs per-asset-under-management/mo); "
+                    "passthrough at cost parity")
+        elif re.search(r"lambda", ut):
+            note = ("Amazon Inspector (Lambda function scanning) → Security Command Center Premium; "
+                    "pricing model differs (per-function-scanned/mo vs per-asset/mo); passthrough at cost parity")
+        elif re.search(r"ec2|instance", ut):
+            note = ("Amazon Inspector (EC2 instance scanning) → Security Command Center Premium; "
+                    "pricing model differs (per-instance-scanned/mo vs per-asset/mo); passthrough at cost parity")
+        else:
+            note = ("Amazon Inspector → Security Command Center Premium; "
+                    "pricing model differs (per-resource-scanned vs per-asset-under-management/mo); "
+                    "passthrough at cost parity")
+        out.append({
+            "aws_li_key":         r["aws_li_key"],
+            "gcp_service":        "Security Command Center",
+            "gcp_sku_id":         None,
+            "gcp_sku_name":       None,
+            "component":          "security",
+            "strategy":           "passthrough",
+            "unit_multiplier":    1.0,
+            "gcp_region":         r.get("gcp_region"),
+            "projection_note":    note,
+            "mapping_confidence": 0.60,
+        })
+    return out
+
+
+def map_marketplace_thirdparty(rows):
+    """AWS Marketplace / third-party SaaS (billed through AWS, not AWS-owned)
+    → no GCP equivalent.
+
+    classify_mechanics.py routes any row here whose product name isn't
+    AWS-branded ("Amazon "/"AWS " prefix) and wasn't caught by a more
+    specific rule above it — Kiro today, any other Marketplace vendor billed
+    the same way tomorrow, without needing a new mapper per vendor. These are
+    third-party products with no Google-owned counterpart to map to at all,
+    unlike GuardDuty/Inspector (real AWS services with a GCP product that
+    covers similar ground, just metered differently). Honest passthrough at
+    cost parity, labeled with the actual product name from the row, is the
+    only correct treatment — there is no "equivalent" to price against.
+    """
+    out = []
+    for r in rows:
+        product = r.get("product") or "third-party product"
+        out.append({
+            "aws_li_key":         r["aws_li_key"],
+            "gcp_service":        None,
+            "gcp_sku_id":         None,
+            "gcp_sku_name":       None,
+            "component":          "saas",
+            "strategy":           "passthrough",
+            "unit_multiplier":    1.0,
+            "gcp_region":         r.get("gcp_region"),
+            "projection_note":    f"{product} (AWS Marketplace/third-party SaaS) — no GCP equivalent; passthrough at cost parity",
+            "mapping_confidence": 0.90,
+        })
+    return out
+
+
+# QuickSight → Looker Studio Pro per-user rate.
+# $9/user/mo is Looker Studio Pro's published list price (cloud.google.com/looker-studio/pricing,
+# checked against the "Pro" per-user tier) — not present in the bundled GCP catalog (Looker Studio
+# is a SaaS product billed outside standard Cloud Billing SKUs), so it is injected as a canonical
+# rate in apply_rates.py the same way egress_rates.EGRESS_SKUS injects rates the catalog can't
+# resolve reliably. sku_id is a synthetic id, not a real catalog SKU.
+GCP_LOOKER_STUDIO_PRO_SKU = "GCP-LOOKER-STUDIO-PRO-USER"
+GCP_LOOKER_STUDIO_PRO_NAME = "Looker Studio Pro (per user)"
+GCP_LOOKER_STUDIO_PRO_RATE = 9.0  # USD / user / month
+
+
+def map_quicksight(rows):
+    """QuickSight → Looker Studio Pro.
+
+    AWS QuickSight CUR usage_type strings directly encode role + edition, e.g.:
+      - "QS-Author-Pro", "APN1-Author-Pro-Fee"        → Author seat (named user)
+      - "QS-Reader-Pro-Session", "APN1-Reader-Pro-Session" → Reader (pay-per-session, capped)
+      - "APN1-Q-Topic-Refresh", "Q-Search-*"          → Q / natural-language-query add-on
+    and — this is standard, documented AWS billing behavior, not an inference —
+    the CUR quantity (total_usage) for Author usage types IS the number of
+    author-months billed. That makes Author seats a real, defensible per-unit
+    conversion: Author seat-months × $9/user/mo (Looker Studio Pro list price).
+
+    Reader/session rows are NOT mapped to the same $9 rate: QuickSight Reader
+    is pay-per-session (capped monthly), a fundamentally different metering
+    model from a flat per-user seat, and Looker Studio's free/viewer tier has
+    no direct paid equivalent to size against. Passthrough (carry AWS cost)
+    rather than either fabricating a per-session Looker rate or claiming $0 —
+    both would misstate the real migration cost more than passthrough does.
+
+    Q/Q-Topic (natural-language query) rows also passthrough: Looker has no
+    directly equivalent NLQ feature to price against.
+    """
+    out = []
+    for r in rows:
+        ut = (r.get("usage_type") or "").lower()
+        op = (r.get("operation") or "").lower()
+        blob = f"{ut} {op}"
+        gcp_region = r.get("gcp_region")
+
+        if re.search(r"q-?topic|q-?search|\bq\b.*question|nlq", blob):
+            out.append({
+                "aws_li_key":         r["aws_li_key"],
+                "gcp_service":        "Looker Studio Pro",
+                "gcp_sku_id":         None,
+                "gcp_sku_name":       None,
+                "component":          "bi",
+                "strategy":           "passthrough",
+                "unit_multiplier":    1.0,
+                "gcp_region":         gcp_region,
+                "projection_note":    ("QuickSight Q (natural-language query) → Looker has no direct "
+                                       "NLQ equivalent; passthrough at cost parity"),
+                "mapping_confidence": 0.55,
+            })
+        elif re.search(r"author", blob):
+            out.append({
+                "aws_li_key":         r["aws_li_key"],
+                "gcp_service":        "Looker Studio Pro",
+                "gcp_sku_id":         GCP_LOOKER_STUDIO_PRO_SKU,
+                "gcp_sku_name":       GCP_LOOKER_STUDIO_PRO_NAME,
+                "gcp_sku_unit":       "user",
+                "component":          "bi",
+                "strategy":           "map",
+                "unit_multiplier":    1.0,
+                "gcp_region":         gcp_region,
+                "projection_note":    (f"QuickSight Author seat → Looker Studio Pro at "
+                                       f"${GCP_LOOKER_STUDIO_PRO_RATE:.0f}/user/mo (published list price; "
+                                       f"CUR quantity for Author usage types is the per-user-month seat count)"),
+                "mapping_confidence": 0.80,
+            })
+        elif re.search(r"reader|session", blob):
+            out.append({
+                "aws_li_key":         r["aws_li_key"],
+                "gcp_service":        "Looker Studio Pro",
+                "gcp_sku_id":         None,
+                "gcp_sku_name":       None,
+                "component":          "bi",
+                "strategy":           "passthrough",
+                "unit_multiplier":    1.0,
+                "gcp_region":         gcp_region,
+                "projection_note":    ("QuickSight Reader (pay-per-session, capped) → Looker Studio has no "
+                                       "paid per-session viewer tier to size against; passthrough at cost parity"),
+                "mapping_confidence": 0.55,
+            })
+        else:
+            out.append({
+                "aws_li_key":         r["aws_li_key"],
+                "gcp_service":        "Looker Studio Pro",
+                "gcp_sku_id":         None,
+                "gcp_sku_name":       None,
+                "component":          "bi",
+                "strategy":           "passthrough",
+                "unit_multiplier":    1.0,
+                "gcp_region":         gcp_region,
+                "projection_note":    f"QuickSight row (usage_type={r.get('usage_type')!r}) not Author/Reader/Q — passthrough at cost parity",
+                "mapping_confidence": 0.50,
+            })
     return out
 
 
@@ -3488,6 +4317,73 @@ def map_cloudwatch(rows):
         dash_blob = f"{prod} {ut} {op}"
         is_dashboard = "dashboard" in dash_blob
 
+        # Alarms: same free-tier story as Dashboards — GCP Cloud Monitoring
+        # alerting policies carry no per-alarm-metric-month charge, so this
+        # is a genuine $0 GCP cost, not merely a unit-incompatible passthrough.
+        # Previously these fell through to the generic count-based-unit
+        # passthrough at the bottom of this function (same bucket as ordinary
+        # API-call/query charges), which kept the full AWS cost on the GCP
+        # side instead of showing the real $0 — understating the actual
+        # migration saving. Detected the same way as Dashboards (PDF bills
+        # carry the signal in product/operation, not usage_type).
+        is_alarm = "alarm" in dash_blob
+
+        # CloudWatch control-plane API requests (describe/list/get-type calls,
+        # billed AWS-side at $0.01/1,000 requests beyond the free tier): GCP
+        # Cloud Monitoring has no billable SKU for its own API calls at all —
+        # same free-tier story as Alarms/Dashboards above, not a genuine
+        # unit-incompatible passthrough. Previously fell to the generic
+        # count-based-unit passthrough at the bottom of this function,
+        # keeping the full AWS cost on the GCP side instead of showing the
+        # real $0. Detected by the AWS per-1,000-requests billing shape
+        # itself (dynamic — matches the real rate description text, not a
+        # hardcoded row) rather than usage_type, since PDF bills carry this
+        # signal only in `operation`/`product`, same as Alarms/Dashboards.
+        is_api_requests = bool(re.search(r"per\s*1,?000\s*requests?", op, re.IGNORECASE))
+
+        # CloudWatch custom metrics (billed AWS-side per metric-month): GCP
+        # Cloud Monitoring bills custom-metric ingestion by INGESTED VOLUME
+        # (MiB/month), not per-metric-count, with the first 150 MiB/project/
+        # month free. Unlike Alarms/Dashboards/API-requests above, this is
+        # NOT unconditionally free — it depends on real ingestion volume
+        # (sample frequency × cardinality × payload size), which a metric
+        # COUNT alone can't determine. Rather than either (a) leaving this
+        # in the generic passthrough bucket, silently carrying the full AWS
+        # cost as if GCP charged the same for a completely different billing
+        # unit, or (b) fabricating a byte-per-metric conversion factor this
+        # codebase has no verified source for, mark it $0 with an explicit,
+        # disclosed assumption the reader can act on: normal per-metric
+        # counts in the tens-to-hundreds range are far below 150 MiB/month
+        # under any realistic sampling rate, but a customer with unusually
+        # high-frequency or high-cardinality custom metrics should verify
+        # actual ingested volume against the real GCP free-tier threshold.
+        is_custom_metrics = bool(re.search(r"metric.?month", op, re.IGNORECASE)) and not is_alarm
+
+        # PutLogEvents = pure log ingestion (not multi-component CloudWatch).
+        # Checked against dash_blob (product+usage_type+operation), not just
+        # `op` alone — confirmed real bug this fixes: for PDF-format bills,
+        # "PutLogEvents" appears in `product` ("AmazonCloudWatch
+        # PutLogEvents") but NOT in `operation` (which only carries the
+        # pricing-description text, e.g. "$0.67 per GB custom log data
+        # ingested..."). Checking `op` alone always missed these rows on PDF
+        # bills, so is_putlogevents was silently False for genuine ingestion
+        # rows — and combined with those same rows' `pricing_unit` being
+        # mislabeled "GB-Mo" upstream (a separate ingest data-quality issue),
+        # they fell into the MONTHLY STORAGE branch below instead of
+        # ingestion, pricing at the ~$0.01/GiBy storage rate instead of the
+        # correct ~$0.50/GiBy ingestion rate — a ~50x undercount.
+        is_putlogevents = "putlogevents" in dash_blob
+
+        # CloudWatch log delivery to S3/Firehose/Lambda is charged at $0.335/GB on
+        # AWS. GCP Cloud Logging log export to any destination (GCS, Pub/Sub,
+        # BigQuery) is FREE — the Log Router doesn't charge for routing. Setting
+        # this to ignore (not passthrough) surfaces the real $0 GCP cost.
+        is_log_export = (
+            re.search(r"delivered to s3|s3[- ]egress|log.*export|export.*s3"
+                      r"|subscription.*filter|delivered to firehose|delivered to kinesis",
+                      f"{ut} {op} {prod}", re.IGNORECASE)
+        )
+
         # Only map log DATA VOLUME rows to Cloud Logging — those where the billing
         # unit is GB/GiB (ingested bytes). Every other CloudWatch row (API calls,
         # queries, metric periods, alarms, dashboard refreshes) is priced in a count
@@ -3495,12 +4391,91 @@ def map_cloudwatch(rows):
         # counts by a GiBy rate inflates by 100x+. Passthrough at AWS cost parity
         # is the safe default until a proper per-unit pricer exists.
         is_log_volume = (
-            ("logbytes" in ut or "datascanned" in ut or "logstorage" in ut
-             or "logingest" in ut or "logingestion" in ut)
+            is_putlogevents
+            or ("logbytes" in ut or "datascanned" in ut or "logstorage" in ut
+                or "logingest" in ut or "logingestion" in ut)
             or (("log" in ut or "log" in op) and p_unit in ("gb", "gib", "gb-mo", "giby.mo"))
         )
 
-        if is_dashboard:
+        if is_log_export:
+            # CloudWatch Logs delivery to S3/Firehose at $0.335/GB has no GCP equivalent.
+            # GCP Cloud Logging routes logs via the Log Router for free — $0 regardless of
+            # destination (GCS, Pub/Sub, BigQuery). Setting strategy=ignore surfaces the
+            # real $0 GCP cost instead of passthroughing the AWS charge.
+            entry = {
+                "aws_li_key":         r["aws_li_key"],
+                "gcp_service":        "Cloud Logging",
+                "gcp_sku_id":         None,
+                "gcp_sku_name":       None,
+                "component":          "log-export",
+                "strategy":           "ignore",
+                "unit_multiplier":    0.0,
+                "gcp_region":         gcp_region,
+                "projection_note":    (
+                    "CloudWatch Logs delivery to S3 ($0.335/GB) → GCP Cloud Logging Log Router "
+                    "export to GCS is free ($0); Log Router charges $0 on GCP"
+                ),
+                "mapping_confidence": 0.93,
+            }
+            out.append(entry)
+            continue
+        elif is_alarm:
+            # GCP Cloud Monitoring alerting policies carry no per-alarm-metric-
+            # month charge; $0 on GCP — same free-tier story as Dashboards below.
+            entry = {
+                "aws_li_key":         r["aws_li_key"],
+                "gcp_service":        "Cloud Monitoring",
+                "gcp_sku_id":         None,
+                "gcp_sku_name":       None,
+                "component":          "alarms",
+                "strategy":           "ignore",
+                "unit_multiplier":    0.0,
+                "gcp_region":         gcp_region,
+                "projection_note":    "CloudWatch Alarms → $0 on GCP (Cloud Monitoring alerting policies included free)",
+                "mapping_confidence": 0.95,
+            }
+            out.append(entry)
+            continue
+        elif is_api_requests:
+            # GCP Cloud Monitoring has no billable SKU for its own API
+            # requests; $0 on GCP — same free-tier story as Alarms/Dashboards.
+            entry = {
+                "aws_li_key":         r["aws_li_key"],
+                "gcp_service":        "Cloud Monitoring",
+                "gcp_sku_id":         None,
+                "gcp_sku_name":       None,
+                "component":          "api-requests",
+                "strategy":           "ignore",
+                "unit_multiplier":    0.0,
+                "gcp_region":         gcp_region,
+                "projection_note":    "CloudWatch API requests → $0 on GCP (Cloud Monitoring API calls have no billable SKU)",
+                "mapping_confidence": 0.90,
+            }
+            out.append(entry)
+            continue
+        elif is_custom_metrics:
+            entry = {
+                "aws_li_key":         r["aws_li_key"],
+                "gcp_service":        "Cloud Monitoring",
+                "gcp_sku_id":         None,
+                "gcp_sku_name":       None,
+                "component":          "custom-metrics",
+                "strategy":           "ignore",
+                "unit_multiplier":    0.0,
+                "gcp_region":         gcp_region,
+                "projection_note":    (
+                    "CloudWatch custom metrics → $0 on GCP: Cloud Monitoring bills custom-"
+                    "metric ingestion by volume (first 150 MiB/project/month free), not per-"
+                    "metric-count like AWS. Assumption: this metric count is well below the "
+                    "free-tier volume under normal sampling rates — verify actual ingested "
+                    "MiB/month with the customer if this bill shows unusually high-frequency "
+                    "or high-cardinality custom metrics"
+                ),
+                "mapping_confidence": 0.60,
+            }
+            out.append(entry)
+            continue
+        elif is_dashboard:
             # GCP Cloud Monitoring has no dashboard charge; $0 on GCP.
             entry = {
                 "aws_li_key":         r["aws_li_key"],
@@ -3517,22 +4492,115 @@ def map_cloudwatch(rows):
             out.append(entry)
             continue
         elif is_log_volume:
-            # CloudWatch Logs ingest = $0.50/GiB. Cloud Logging ingest = $0.50/GiB.
-            # Rate parity → passthrough at AWS cost gives the correct GCP estimate.
-            # The bundled catalog has only Log Storage (retention) SKUs, not the ingestion
-            # SKU, so resolve_sku returns the wrong rate. Passthrough is more accurate.
-            entry = {
-                "aws_li_key":         r["aws_li_key"],
-                "gcp_service":        "Cloud Logging",
-                "gcp_sku_id":         None,
-                "gcp_sku_name":       "Log Storage",
-                "component":          "logs",
-                "strategy":           "passthrough",
-                "unit_multiplier":    1.0,
-                "gcp_region":         gcp_region,
-                "projection_note":    "CloudWatch Logs data volume → Cloud Logging storage/ingestion parity ($0.50/GiB on both, passthrough = parity)",
-                "mapping_confidence": 0.90,
-            }
+            # CloudWatch Logs ingest = $0.50/GB (AWS decimal GB).
+            # Cloud Logging ingestion = $0.50/GiB = ~$0.4655/GB — GCP is ~7% CHEAPER
+            # than AWS due to the GiB/GB difference (1 GiB = 1.074 GB → $0.50/1.074 = $0.4655/GB).
+            #
+            # The catalog DOES carry the real ingestion SKU — confirmed by
+            # querying data/catalog.duckdb directly: "Log Storage cost"
+            # (143F-A1B0-E0BE), despite its misleading name, has tiered_rates
+            # (0-50 GiB: free, 50+ GiB: $0.50/GiB) — that IS GCP's real
+            # published log-ingestion pricing (50 GiB/project/month free,
+            # then $0.50/GiB), with real regional coverage including
+            # asia-south1. A prior version of this code assumed no matching
+            # catalog SKU existed and injected a hardcoded flat-$0.50/GiB
+            # pseudo-SKU instead — resolving the real SKU dynamically is
+            # strictly better: it stays accurate across catalog refreshes,
+            # and apply_rates.py's tiered-rate blending applies the real
+            # 50 GiB free tier per-SKU (based on that SKU's total usage
+            # across the bill) instead of ignoring it entirely.
+            if is_putlogevents:
+                # AWS bills in decimal GB; Cloud Logging is priced per GiB.
+                # 1 GB = 1/1.0737 GiB → multiply usage by 0.9313 before applying $0.50/GiB.
+                sku_id = resolve_sku("Cloud Logging", "Log Storage cost", gcp_region)
+                note = (
+                    "CloudWatch PutLogEvents (log ingestion) → Cloud Logging log ingestion "
+                    "(catalog SKU 143F-A1B0-E0BE — despite being named 'Log Storage cost', its "
+                    "real tiered rate is 0-50 GiB free then $0.50/GiB, GCP's actual ingestion "
+                    "pricing); AWS $0.50/GB, 1 GiB = 1.074 GB so GCP is ~7% cheaper per byte"
+                ) + _no_rate_suffix(sku_id, gcp_region)
+                confidence = 0.92 if sku_id else 0.60
+                entry = {
+                    "aws_li_key":         r["aws_li_key"],
+                    "gcp_service":        "Cloud Logging",
+                    "gcp_sku_id":         sku_id if sku_id else None,
+                    "gcp_sku_name":       "Log Storage cost",
+                    "component":          "logs",
+                    "strategy":           "map" if sku_id else "passthrough",
+                    "unit_multiplier":    1 / 1.073741824,  # decimal GB → binary GiB
+                    "gcp_region":         gcp_region,
+                    "projection_note":    note,
+                    "mapping_confidence": confidence,
+                }
+            elif p_unit.endswith("-mo") or p_unit.endswith(".mo"):
+                # A "-Mo"/"-mo" unit (e.g. "GB-Mo", "GiBy.Mo") is a MONTHLY
+                # STORAGE volume (CloudWatch's TimedStorage-ByteHrs: what's
+                # retained, billed per GB stored per month), not ingested
+                # bytes — a completely different SKU/rate. Confirmed real,
+                # severe bug this fixes: this branch used to reuse the
+                # ingestion pseudo-SKU (GCP-CLLOG-INGEST-GIB, $0.50/GiB —
+                # injected in apply_rates.py specifically and only for
+                # PutLogEvents rows, per that injection's own comment) for
+                # EVERY is_log_volume row regardless of unit, so a
+                # TimedStorage-ByteHrs row got billed at the $0.50/GiB
+                # ingestion rate instead of the real ~$0.01/GiB-mo storage
+                # rate — a ~50x overcount (confirmed: a 2,227 GB-Mo storage
+                # row priced at $1,013.94 instead of the correct ~$22).
+                #
+                # The catalog has THREE similarly-named Cloud Logging SKUs —
+                # confirmed by querying data/catalog.duckdb directly:
+                #   "Log Storage cost"    (143F-A1B0-E0BE): tiers (0-50 GiB
+                #                          free, 50+ GiB: $0.50/GiB) — that's
+                #                          the INGESTION structure under a
+                #                          misleading name, NOT this row's rate.
+                #   "Vended Logs Storage" (376D-A4B0-82E4): flat $0.25/GiB —
+                #                          a different Logging product tier.
+                #   "Log Retention cost"  (F4AE-5A52-ACE3): flat $0.01/GiBy,
+                #                          unit "GiBy.mo" — matches this row's
+                #                          unit shape AND the real extended-
+                #                          retention storage rate. This is the
+                #                          correct SKU; resolve it dynamically
+                #                          via the real catalog instead of
+                #                          hardcoding a rate, so a future
+                #                          catalog refresh (new region
+                #                          coverage, a rate change) is picked
+                #                          up automatically rather than going
+                #                          stale behind a fixed injected value.
+                sku_id = resolve_sku("Cloud Logging", "Log Retention cost", gcp_region)
+                note = ("CloudWatch Logs storage (TimedStorage-ByteHrs) → Cloud Logging "
+                        "Log Retention cost (~$0.01/GiBy-mo; catalog SKU F4AE-5A52-ACE3 — "
+                        "NOT the similarly-named 'Log Storage cost' SKU, which despite its "
+                        "name carries the $0.50/GiB ingestion tier structure); GB→GiB "
+                        "conversion applied") + _no_rate_suffix(sku_id, gcp_region)
+                entry = {
+                    "aws_li_key":         r["aws_li_key"],
+                    "gcp_service":        "Cloud Logging",
+                    "gcp_sku_id":         sku_id if sku_id else None,
+                    "gcp_sku_name":       "Log Retention cost",
+                    "component":          "logs",
+                    "strategy":           "map" if sku_id else "passthrough",
+                    "unit_multiplier":    1 / 1.073741824,
+                    "gcp_region":         gcp_region,
+                    "projection_note":    note,
+                    "mapping_confidence": 0.90 if sku_id else 0.60,
+                }
+            else:
+                sku_id = resolve_sku("Cloud Logging", "Log Storage cost", gcp_region)
+                note = ("CloudWatch Logs data volume → Cloud Logging log ingestion (catalog SKU "
+                        "143F-A1B0-E0BE, real tiered rate 0-50 GiB free then $0.50/GiB); "
+                        "GB→GiB conversion applied (~7% cheaper on GCP)") + _no_rate_suffix(sku_id, gcp_region)
+                entry = {
+                    "aws_li_key":         r["aws_li_key"],
+                    "gcp_service":        "Cloud Logging",
+                    "gcp_sku_id":         sku_id if sku_id else None,
+                    "gcp_sku_name":       "Log Storage cost",
+                    "component":          "logs",
+                    "strategy":           "map" if sku_id else "passthrough",
+                    "unit_multiplier":    1 / 1.073741824,
+                    "gcp_region":         gcp_region,
+                    "projection_note":    note,
+                    "mapping_confidence": 0.90 if sku_id else 0.60,
+                }
         else:
             # API calls, queries, metric periods, alarms, dashboards — count-based units
             # don't translate to Cloud Monitoring/Logging volume rates. Passthrough.
@@ -4111,7 +5179,7 @@ def map_msk(rows: list) -> list:
                 # decision, never a silent substitution — passthrough +
                 # disclosure only.
                 cpu_sku = ram_sku = None
-                x86_default = "E2" if is_arm_burstable else "N2D AMD"
+                x86_default = "E2" if is_arm_burstable else "N4D"
                 x86_tiers = ("burstable", "sustained") if is_arm_burstable else ("sustained",)
                 family_label = "no GCP rate found in region"
                 x86_label, x86_core, x86_ram, _, _ = cheapest_in_scope(
@@ -4128,7 +5196,7 @@ def map_msk(rows: list) -> list:
 
             if found_arm:
                 x86_label, x86_core, x86_ram, _, _ = cheapest_in_scope(
-                    "E2" if is_arm_burstable else "N2D AMD", vcpu, ram_gib, region,
+                    "E2" if is_arm_burstable else "N4D", vcpu, ram_gib, region,
                     archs=("x86",), tiers=("burstable", "sustained") if is_arm_burstable else ("sustained",))
                 arm_core_rate = _family_hourly_rate("Compute Engine", cpu_desc, region)
                 arm_ram_rate = _family_hourly_rate("Compute Engine", ram_desc, region)
@@ -4144,8 +5212,11 @@ def map_msk(rows: list) -> list:
                                      "since Graviton/ARM binaries aren't x86-compatible without a rebuild; "
                                      "confirm with customer whether x86 is viable]")
         elif is_burstable:
+            # min_generation floored to N4D's generation, not E2's — see the
+            # identical fix (and its rationale) in map_compute_burstable above.
             family_label, cpu_desc, ram_desc, switched, reason = cheapest_in_scope(
-                "E2", vcpu, ram_gib, region, archs=("x86",), tiers=("burstable", "sustained"))
+                "E2", vcpu, ram_gib, region, archs=("x86",), tiers=("burstable", "sustained"),
+                min_generation=_GP_FAMILY_GENERATION.get("N4D", 4))
             cpu_sku = _strict_resolve_sku("Compute Engine", cpu_desc, region)
             ram_sku = _strict_resolve_sku("Compute Engine", ram_desc, region)
             if switched:
@@ -4153,7 +5224,7 @@ def map_msk(rows: list) -> list:
                             else f" [cost-tier: E2 unavailable in region — {family_label} used instead, same/better perf]")
         else:
             family_label, cpu_desc, ram_desc, switched, reason = cheapest_in_scope(
-                "N2", vcpu, ram_gib, region, archs=("x86",), tiers=("sustained",))
+                "N4D", vcpu, ram_gib, region, archs=("x86",), tiers=("sustained",))
             cpu_sku = _strict_resolve_sku("Compute Engine", cpu_desc, region)
             ram_sku = _strict_resolve_sku("Compute Engine", ram_desc, region)
             if switched:
@@ -4257,14 +5328,109 @@ _BURST_ITYPE_RE = re.compile(
 )
 
 
-def map_opensearch(rows: list[dict]) -> list[dict]:
-    """OpenSearch rows are handled by the Phase 2 LLM sub-agent with structured guidance.
+_OPENSEARCH_ITYPE_RE = re.compile(r'\b([a-z]\d+[a-z]?)\.([a-z0-9]+)\.search\b', re.IGNORECASE)
+_OPENSEARCH_ARM_RE = re.compile(r'^[a-z]\d+g$', re.IGNORECASE)
 
-    This function is intentionally empty — it writes an empty mappings file so the
-    orchestrator sees the group as 'processed', while the rows remain in the Phase 2
-    manifest for the dedicated opensearch LLM agent to handle.
+
+def map_opensearch(rows: list[dict]) -> list[dict]:
+    """OpenSearch/Elasticsearch domain COMPUTE rows (r5.large.search,
+    r6g.large.search, t3.medium.search, ...) map deterministically to
+    self-managed Compute Engine — same core+ram breakdown, same
+    cheapest_in_scope() cost-tier sweep with the generation floor, and the
+    same ARM/x86/burstable branching already used for plain EC2 rows
+    (map_gce_row) and MSK broker hours (map_msk). OpenSearch's own instance
+    naming is identical to EC2's, just with a trailing '.search' suffix, so
+    no separate vCPU/RAM table is needed — _arm_specs()/_BURSTABLE_EC2_SPECS
+    (both formula/table-driven off the family's first letter and AWS's
+    standard size names) apply unchanged.
+
+    This replaces the previous no-op stub that deferred every OpenSearch row
+    to the Phase 2 LLM sub-agent unconditionally. Rows whose instance type
+    can't be parsed (no '.search' instance-hour row — storage, IOPS,
+    snapshots, or an unrecognized family/size) still fall through to that
+    LLM path via the returned llm_rows list, unchanged from before.
+
+    'Self-managed GCE' is a real capability gap, not a like-for-like swap —
+    OpenSearch is a managed service, this only prices the raw compute. Every
+    emitted row discloses that so it reads as directional, not authoritative,
+    same caveat the report's own methodology section already states.
     """
-    return []
+    out = []
+    llm_rows = []
+    for r in rows:
+        region = r.get("gcp_region") or "global"
+        raw_itype = (r.get("instance_type") or "").lower().strip()
+        m = (_OPENSEARCH_ITYPE_RE.search(raw_itype)
+             or _OPENSEARCH_ITYPE_RE.search(f"{r.get('usage_type') or ''} {r.get('operation') or ''}".lower()))
+        if not m:
+            llm_rows.append(r)
+            continue
+
+        family, size = m.group(1).lower(), m.group(2).lower()
+        is_burstable = family in ("t2", "t3", "t3a", "t4g")
+        specs = (_BURSTABLE_EC2_SPECS.get(f"{family}.{size}") if is_burstable
+                 else _arm_specs(family, size))
+        if specs is None:
+            llm_rows.append(r)
+            continue
+
+        vcpu, ram_gib = specs
+        is_arm = bool(_OPENSEARCH_ARM_RE.match(family))
+
+        if is_arm:
+            native_default = "T2A Arm" if is_burstable else "C4A Arm"
+            native_archs = ("arm",)
+            tiers = ("burstable", "sustained") if is_burstable else ("sustained",)
+        elif is_burstable:
+            native_default = "E2"
+            native_archs = ("x86",)
+            tiers = ("burstable", "sustained")
+        else:
+            native_default = "N4D"
+            native_archs = ("x86",)
+            tiers = ("sustained",)
+
+        # Same N4D/T2A-Arm generation-floor fix as map_compute_burstable/
+        # map_msk: a burstable default's own generation (E2:2 / T2A Arm:4)
+        # must not be the floor for a cost-tier switch — only N4D/T2A Arm's
+        # generation (4) is, so a switch can never land on N2D/T2D (gen 2).
+        min_gen = None
+        if is_burstable:
+            min_gen = _GP_FAMILY_GENERATION.get("T2A Arm" if is_arm else "N4D", 4)
+
+        family_label, core_desc, ram_desc, switched, reason = cheapest_in_scope(
+            native_default, vcpu, ram_gib, region, archs=native_archs, tiers=tiers,
+            min_generation=min_gen)
+        cpu_sku = _strict_resolve_sku(GCP_COMPUTE_ENGINE, core_desc, region)
+        ram_sku = _strict_resolve_sku(GCP_COMPUTE_ENGINE, ram_desc, region)
+
+        cost_tag = ""
+        if switched:
+            cost_tag = (f" [cost-tier: {family_label} cheaper than {native_default} here, same/better perf]"
+                        if reason == "cheaper"
+                        else f" [cost-tier: {native_default} unavailable in region — {family_label} used instead]")
+
+        for comp, sku, mult, desc in (
+            ("core", cpu_sku, float(vcpu),    core_desc),
+            ("ram",  ram_sku, float(ram_gib), ram_desc),
+        ):
+            strategy = "map" if sku else "passthrough"
+            out.append({
+                "aws_li_key":         r["aws_li_key"],
+                "gcp_service":        GCP_COMPUTE_ENGINE,
+                "gcp_sku_id":         sku if sku else None,
+                "gcp_sku_name":       desc,
+                "component":          comp,
+                "strategy":           strategy,
+                "unit_multiplier":    mult,
+                "gcp_region":         region,
+                "projection_note":    (f"OpenSearch {family}.{size}.search → self-managed GCE "
+                                       f"{family_label} ({vcpu} vCPU / {ram_gib:.1f} GiB); component={comp}; "
+                                       "self-managed infra estimate, not a managed-service equivalent — "
+                                       f"treat as directional only{cost_tag}"),
+                "mapping_confidence": 0.70,
+            })
+    return out, llm_rows
 
 
 def map_compute_burstable(rows: list[dict]) -> list[dict]:
@@ -4329,8 +5495,18 @@ def map_compute_burstable(rows: list[dict]) -> list[dict]:
         is_arm_source = itype.split(".")[0] == "t4g"
         native_default = "T2A Arm" if is_arm_source else "E2"
         native_archs = ("arm",) if is_arm_source else ("x86",)
+        # min_generation pinned to N4D/T2A's own generation (4), not E2's (2):
+        # E2 itself stays a valid candidate (it's always kept regardless of
+        # floor — see cheapest_in_scope's default_label carve-out), but any
+        # OTHER family a cost-tier switch lands on must be gen-4-or-newer.
+        # Without this, the floor defaulted to E2's own generation (2), so
+        # N2D AMD/T2D AMD (also gen 2) cleared it and won on price alone —
+        # exactly the legacy-hardware substitution the floor exists to block,
+        # just reached via the burstable default instead of a sustained one.
+        sustained_alt = "N4D" if not is_arm_source else "T2A Arm"
         family_label, core_desc, ram_desc, switched, reason = cheapest_in_scope(
-            native_default, vcpu, ram_gib, region, archs=native_archs, tiers=("burstable", "sustained"))
+            native_default, vcpu, ram_gib, region, archs=native_archs, tiers=("burstable", "sustained"),
+            min_generation=_GP_FAMILY_GENERATION.get(sustained_alt, 4))
         # _strict_resolve_sku, not resolve_sku — see its docstring: a plain
         # resolve_sku() call could continent-fallback to a different region's
         # SKU/price for a family cheapest_in_scope() already confirmed (via
@@ -4492,7 +5668,7 @@ def map_compute_arm(rows: list[dict]) -> list[dict]:
                     cost_tag = (" [cost-tier: t4g burstable — AWS CPU credits don't lower AWS price, "
                                 "so cheapest available ARM family is a pure win, no performance downside]")
                 x86_label, x86_core, x86_ram, _, _ = cheapest_in_scope(
-                    "N2D AMD", vcpu, ram_gib, region, archs=("x86",), tiers=("burstable", "sustained"))
+                    "N4D", vcpu, ram_gib, region, archs=("x86",), tiers=("burstable", "sustained"))
                 arm_core_rate = _family_hourly_rate(GCP_COMPUTE_ENGINE, cpu_desc, region)
                 arm_ram_rate = _family_hourly_rate(GCP_COMPUTE_ENGINE, ram_desc, region)
                 x86_core_rate = _family_hourly_rate(GCP_COMPUTE_ENGINE, x86_core, region)
@@ -4561,7 +5737,7 @@ def map_compute_arm(rows: list[dict]) -> list[dict]:
                 cpu_sku = ram_sku = None
                 gcp_family = "no GCP rate found in region"
                 x86_label, x86_core, x86_ram, _, _ = cheapest_in_scope(
-                    "N2D AMD", vcpu, ram_gib, region, archs=("x86",), tiers=("sustained",))
+                    "N4D", vcpu, ram_gib, region, archs=("x86",), tiers=("sustained",))
                 x86_core_rate = _family_hourly_rate(GCP_COMPUTE_ENGINE, x86_core, region)
                 x86_ram_rate = _family_hourly_rate(GCP_COMPUTE_ENGINE, x86_ram, region)
                 if x86_core_rate is not None and x86_ram_rate is not None:
@@ -4579,7 +5755,7 @@ def map_compute_arm(rows: list[dict]) -> list[dict]:
             # map_compute_burstable().
             if found_arm:
                 x86_label, x86_core, x86_ram, x86_switched, _ = cheapest_in_scope(
-                    "N2D AMD", vcpu, ram_gib, region, archs=("x86",), tiers=("sustained",))
+                    "N4D", vcpu, ram_gib, region, archs=("x86",), tiers=("sustained",))
                 arm_core_rate = _family_hourly_rate(GCP_COMPUTE_ENGINE, cpu_desc, region)
                 arm_ram_rate = _family_hourly_rate(GCP_COMPUTE_ENGINE, ram_desc, region)
                 x86_core_rate = _family_hourly_rate(GCP_COMPUTE_ENGINE, x86_core, region)
@@ -4792,6 +5968,21 @@ def map_compute_windows(rows: list[dict]) -> list[dict]:
         # ever land on E2; the sustained branch stays within the sustained
         # tier (N2D/N4D/T2D) so a "cheaper" pick can never mean "lower tier."
         is_burstable = itype.split(".")[0] in ("t2", "t3", "t3a")
+        # Workload scoping (Performance-Tier Safety Rule, same as
+        # map_gce_row()): a compute-optimized source (c4/c5/c5a) must only be
+        # compared against GCP's compute-optimized line (C4/C4D/C4N/...),
+        # never silently cross into general-purpose N4/N4D even if cheaper;
+        # a memory-optimized source (r5/r6i) stays in the general/N-series
+        # pool (GCP's dedicated M-series has large fixed minimum sizes unfit
+        # for arbitrary r5.large-style requests — same reasoning as
+        # family_mapper.py's map_gce_row()). Was previously hardcoded to
+        # "general" workload for every non-ARM/non-burstable row regardless
+        # of AWS family letter — silently letting a compute-optimized c5/c5a
+        # Windows instance shop against the cheaper general-purpose pool.
+        aws_prefix = itype[0] if itype else "m"
+        is_compute_workload = aws_prefix == "c"
+        sustained_workloads = ("compute",) if is_compute_workload else ("general",)
+        sustained_default = "C4D" if is_compute_workload else "N4D"
         switched = False
         if is_arm:
             # Confirmed dead code today (AWS doesn't sell Windows on
@@ -4818,7 +6009,8 @@ def map_compute_windows(rows: list[dict]) -> list[dict]:
             ram_sku = _strict_resolve_sku(GCP_COMPUTE_ENGINE, ram_desc, region)
         else:
             family_label, cpu_desc, ram_desc, switched, reason = cheapest_in_scope(
-                "N2D AMD", vcpu, ram_gib, region, archs=("x86",), tiers=("sustained",))
+                sustained_default, vcpu, ram_gib, region, archs=("x86",), tiers=("sustained",),
+                workloads=sustained_workloads)
             cpu_sku = _strict_resolve_sku(GCP_COMPUTE_ENGINE, cpu_desc, region)
             ram_sku = _strict_resolve_sku(GCP_COMPUTE_ENGINE, ram_desc, region)
 
@@ -4876,7 +6068,7 @@ def main():
         FROM aws_li_catalog
         WHERE mechanic_group IN
               ('flat_hourly', 'object_storage', 'per_request', 'block_storage', 'data_transfer',
-               'non_workload', 'cloudwatch', 'guardduty', 'redshift', 'athena', 'kinesis', 'efs',
+               'non_workload', 'cloudwatch', 'guardduty', 'inspector', 'marketplace_thirdparty', 'quicksight', 'redshift', 'athena', 'kinesis', 'efs',
                'xray', 'fsx', 'emr', 'elasticache', 'msk', 'compute_windows', 'compute_arm',
                'compute_burstable', 'managed_db', 'opensearch', 'commitment_discount')
     """).fetchall()
@@ -4889,7 +6081,7 @@ def main():
     by_group: dict[str, list] = {g: [] for g in
                                  ("flat_hourly", "object_storage", "per_request",
                                   "block_storage", "data_transfer", "non_workload", "cloudwatch", "msk",
-                                  "guardduty", "redshift", "athena", "kinesis", "efs", "xray",
+                                  "guardduty", "inspector", "marketplace_thirdparty", "quicksight", "redshift", "athena", "kinesis", "efs", "xray",
                                   "fsx", "emr", "elasticache", "compute_windows", "compute_arm",
                                   "compute_burstable", "managed_db", "opensearch", "commitment_discount")}
     for raw in rows:
@@ -4908,6 +6100,9 @@ def main():
         "non_workload":   map_non_workload,
         "cloudwatch":     map_cloudwatch,
         "guardduty":      map_guardduty,
+        "inspector":      map_inspector,
+        "marketplace_thirdparty": map_marketplace_thirdparty,
+        "quicksight":     map_quicksight,
         "redshift":       map_redshift,
         "athena":         map_athena,
         "kinesis":        map_kinesis,

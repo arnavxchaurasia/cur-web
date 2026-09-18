@@ -54,6 +54,11 @@ type Config struct {
 	// permitted to log in, from $ALLOWED_DOMAINS. Defaults to
 	// "google.com,facets.cloud" if unset.
 	AllowedDomains []string
+	// FacetsLoginEmails is a comma-separated allow-list from
+	// $FACETS_LOGIN_EMAILS. Only these emails may complete a login where
+	// next=/facets; everyone else is rejected before a session is issued.
+	// Empty = the /facets login door is closed to everyone.
+	FacetsLoginEmails []string
 }
 
 func (c *Config) JobsDir() string { return c.DataDir + "/jobs" }
@@ -110,6 +115,7 @@ func LoadFromEnv() (*Config, error) {
 		DevAuthBypass:      devBypass,
 		AdminEmails:        parseAdminEmails(os.Getenv("ADMIN_EMAILS")),
 		AllowedDomains:     parseAllowedDomains(os.Getenv("ALLOWED_DOMAINS")),
+		FacetsLoginEmails:  parseAdminEmails(os.Getenv("FACETS_LOGIN_EMAILS")),
 	}, nil
 }
 

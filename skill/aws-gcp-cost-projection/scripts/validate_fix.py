@@ -170,48 +170,54 @@ _GCP_FAMILY_OVERRIDES = {
     # ── FPGA — GCP has no FPGA; let LLM decide, gate disabled ────────────────
     # "f1": None (omitted intentionally)
     # ── Memory-Optimized: r-family (8 GB/vCPU) ───────────────────────────────
-    "r5":    "N2",   "r5b":  "N2",  "r5d":   "N2",  "r5n":  "N2",
-    "r5a":   "N2D",  "r5ad": "N2D",
-    "r6i":   "N2",   "r6id": "N2",  "r6idn": "N2",  "r6in": "N2",
-    "r6a":   "N2D",
-    "r6g":   "T2A",  "r6gd": "T2A",
-    "r7i":   "N2",   "r7iz": "N2",
-    "r7a":   "N2D",
-    "r7g":   "T2A",  "r7gd": "T2A",
-    "r8g":   "T2A",
+    # 4th-gen preferred unconditionally, regardless of the AWS source
+    # generation — same policy as family_map.json's gcp_families table
+    # (no min_aws_gen gate any more): N2/N2D/C2/T2A were legacy fallbacks
+    # this table never updated when the rest of the pipeline moved to
+    # N4/N4D/C4/C4D/C4A, so this "validator autofix" was silently reverting
+    # family_mapper.py's correct 4th-gen choice back to 2nd-gen every run.
+    "r5":    "N4",   "r5b":  "N4",  "r5d":   "N4",  "r5n":  "N4",
+    "r5a":   "N4D",  "r5ad": "N4D",
+    "r6i":   "N4",   "r6id": "N4",  "r6idn": "N4",  "r6in": "N4",
+    "r6a":   "N4D",
+    "r6g":   "C4A",  "r6gd": "C4A",
+    "r7i":   "N4",   "r7iz": "N4",
+    "r7a":   "N4D",
+    "r7g":   "C4A",  "r7gd": "C4A",
+    "r8g":   "C4A",
     # ── Memory-Optimized: x-family (15–32 GB/vCPU) ───────────────────────────
     "x1":    "M1",   # ~15 GB/vCPU → M1 megamem
     "x1e":   "M1",   # ~30 GB/vCPU → M1 ultramem
     "x2idn": "M3",   # ~16 GB/vCPU → M3 megamem
     "x2iedn":"M3",   # ~32 GB/vCPU → M3 ultramem
     "x2iezn":"M3",
-    "x2gd":  "T2A",
+    "x2gd":  "C4A",
     # ── High-Frequency ────────────────────────────────────────────────────────
-    "z1d":   "C2",   # 4 GHz all-core → C2 compute-optimized
+    "z1d":   "C4",   # 4 GHz all-core → C4 compute-optimized
     # ── Compute-Optimized ────────────────────────────────────────────────────
-    "c5":    "C2",   "c5n":  "C2",  "c5d":   "C2",
-    "c5a":   "N2D",  "c5ad": "N2D",
-    "c6i":   "C2",   "c6id": "C2",  "c6in":  "C2",
-    "c6a":   "N2D",
-    "c6g":   "T2A",  "c6gd": "T2A", "c6gn":  "T2A",
-    "c7i":   "C2",
-    "c7a":   "N2D",
-    "c7g":   "T2A",  "c7gd": "T2A", "c7gn":  "T2A",
-    "c8g":   "T2A",
+    "c5":    "C4",   "c5n":  "C4",  "c5d":   "C4",
+    "c5a":   "C4D",  "c5ad": "C4D",
+    "c6i":   "C4",   "c6id": "C4",  "c6in":  "C4",
+    "c6a":   "C4D",
+    "c6g":   "C4A",  "c6gd": "C4A", "c6gn":  "C4A",
+    "c7i":   "C4",
+    "c7a":   "C4D",
+    "c7g":   "C4A",  "c7gd": "C4A", "c7gn":  "C4A",
+    "c8g":   "C4A",
     # ── General-Purpose: m-family ─────────────────────────────────────────────
-    "m5":    "N2",   "m5n":  "N2",  "m5d":   "N2",  "m5dn": "N2",  "m5zn": "N2",
-    "m5a":   "N2D",  "m5ad": "N2D",
-    "m6i":   "N2",   "m6id": "N2",  "m6idn": "N2",  "m6in": "N2",
-    "m6a":   "N2D",
-    "m6g":   "T2A",  "m6gd": "T2A",
-    "m7i":   "N2",
-    "m7a":   "N2D",
-    "m7g":   "T2A",  "m7gd": "T2A",
-    "m8g":   "T2A",
+    "m5":    "N4",   "m5n":  "N4",  "m5d":   "N4",  "m5dn": "N4",  "m5zn": "N4",
+    "m5a":   "N4D",  "m5ad": "N4D",
+    "m6i":   "N4",   "m6id": "N4",  "m6idn": "N4",  "m6in": "N4",
+    "m6a":   "N4D",
+    "m6g":   "C4A",  "m6gd": "C4A",
+    "m7i":   "N4",
+    "m7a":   "N4D",
+    "m7g":   "C4A",  "m7gd": "C4A",
+    "m8g":   "C4A",
     # ── Storage-Optimized ────────────────────────────────────────────────────
-    "i3":    "N2",   "i3en": "N2",  "i4i":   "N2",  "i7ie": "N2",
-    "i4g":   "T2A",  "im4gn":"T2A", "is4gen":"T2A",
-    "d2":    "N2",   "d3":   "N2",  "d3en":  "N2",
+    "i3":    "N4",   "i3en": "N4",  "i4i":   "N4",  "i7ie": "N4",
+    "i4g":   "C4A",  "im4gn":"C4A", "is4gen":"C4A",
+    "d2":    "N4",   "d3":   "N4",  "d3en":  "N4",
 }
 
 def gcp_family_for(itype, arch):
@@ -224,7 +230,7 @@ def gcp_family_for(itype, arch):
 
     # Architecture flag is authoritative
     if arch == "arm64":
-        return "T2A"
+        return "C4A"
 
     # Explicit override table (covers GPU, memory, and compute families)
     if fam in _GCP_FAMILY_OVERRIDES:
@@ -236,12 +242,12 @@ def gcp_family_for(itype, arch):
 
     # Graviton detection from family suffix when arch flag is absent
     if fam == "a1" or fam.endswith("g") or fam.endswith("gd") or fam.endswith("gn"):
-        return "T2A"
+        return "C4A"
 
     if fam in BURSTABLE_PREFIXES:
         return "E2"
 
-    return "N2D"
+    return "N4D"
 
 def _family_in_name(fam, name):
     name = name or ""
@@ -695,16 +701,26 @@ def main():
                                     (?, ?, ?, ?, ?, 'OnDemand', ?, ?, ?, 'validator-repaired', 'catalog-bundled')
                                 """, (good_sku, svc, desc, rf, rg, target_region, unit, rate))
                                 
-                                # Synthesize Commit1Yr and Commit3Yr rates
-                                p1, p3 = _cud_factors(svc)
-                                con.execute("""
-                                    INSERT OR REPLACE INTO gcp_sku_rates VALUES
-                                    (?, ?, ?, ?, ?, 'Commit1Yr', ?, ?, ?, 'validator-repaired', 'catalog-bundled')
-                                """, (good_sku, svc, desc + " (Commit1Yr alias)", rf, rg, target_region, unit, rate * p1))
-                                con.execute("""
-                                    INSERT OR REPLACE INTO gcp_sku_rates VALUES
-                                    (?, ?, ?, ?, ?, 'Commit3Yr', ?, ?, ?, 'validator-repaired', 'catalog-bundled')
-                                """, (good_sku, svc, desc + " (Commit3Yr alias)", rf, rg, target_region, unit, rate * p3))
+                                # Synthesize Commit1Yr and Commit3Yr rates — but
+                                # only for resource types GCP actually offers
+                                # committed-use discounts on. Same bug class as
+                                # the CUD-synth autofix below: Compute Engine
+                                # bundles CPU/RAM/GPU (committable) with
+                                # Hyperdisk/External IP/egress/PD-snapshot
+                                # (NOT committable) under one gcp_service label
+                                # — synthesizing a "committed" rate for those
+                                # is a fabricated discount that doesn't exist
+                                # on real GCP.
+                                if svc != "Compute Engine" or rg in ("CPU", "RAM", "GPU"):
+                                    p1, p3 = _cud_factors(svc)
+                                    con.execute("""
+                                        INSERT OR REPLACE INTO gcp_sku_rates VALUES
+                                        (?, ?, ?, ?, ?, 'Commit1Yr', ?, ?, ?, 'validator-repaired', 'catalog-bundled')
+                                    """, (good_sku, svc, desc + " (Commit1Yr alias)", rf, rg, target_region, unit, rate * p1))
+                                    con.execute("""
+                                        INSERT OR REPLACE INTO gcp_sku_rates VALUES
+                                        (?, ?, ?, ?, ?, 'Commit3Yr', ?, ?, ?, 'validator-repaired', 'catalog-bundled')
+                                    """, (good_sku, svc, desc + " (Commit3Yr alias)", rf, rg, target_region, unit, rate * p3))
                         finally:
                             try:
                                 con.execute("DETACH catalog")
@@ -725,6 +741,19 @@ def main():
         for svc, (p1, p3) in CUD_PCT.items():
             if svc == "DEFAULT":
                 continue  # "DEFAULT" is a fallback key, not a real GCP service name
+            # Compute Engine bundles CPU/RAM/GPU (committable) with Hyperdisk
+            # storage, External IP, network egress, and PD snapshots (NOT
+            # committable — GCP offers no CUD on any of those product types)
+            # under the same gcp_service label. Confirmed real bug: without
+            # this restriction, every Compute-Engine-tagged SKU got a
+            # synthesized "committed" rate regardless of resource type — a
+            # live job showed real, non-existent CUD discounts on egress and
+            # snapshot storage rows, materially understating the 1yr/3yr CUD
+            # totals. apply_rates.py's own CUD synthesis (and
+            # incremental_rerate.py's) already restrict to CPU/RAM/GPU for
+            # Compute Engine; this autofix must match that same restriction,
+            # not silently offer a wider (wrong) eligibility set.
+            rg_clause = "AND od.resource_group IN ('CPU','RAM','GPU')" if svc == "Compute Engine" else ""
             for pt, factor in (("Commit1Yr", p1), ("Commit3Yr", p3)):
                 try:
                     con.execute(f"""
@@ -737,6 +766,7 @@ def main():
                                'CUD synthesized from OD x {factor}'
                         FROM gcp_sku_rates od
                         WHERE od.gcp_service = ? AND od.pricing_type = 'OnDemand'
+                          {rg_clause}
                           AND NOT EXISTS (SELECT 1 FROM gcp_sku_rates r
                             WHERE r.gcp_sku_id = od.gcp_sku_id AND r.region = od.region
                               AND r.pricing_type = '{pt}')

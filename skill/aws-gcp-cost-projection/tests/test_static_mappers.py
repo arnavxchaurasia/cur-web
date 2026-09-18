@@ -535,11 +535,18 @@ def test_marketplace_passthrough():
 # ---------------------------------------------------------------------------
 
 def test_cloudwatch_log_bytes_maps_to_cloud_logging():
+    # Stale expectation fixed: this predates the ingestion-SKU work and
+    # expected a bare cost-parity passthrough, but log-volume rows resolve
+    # to a real catalog SKU ("Log Storage cost", 143F-A1B0-E0BE — its real
+    # tiered rate, despite the name, is 0-50 GiB free then $0.50/GiB, GCP's
+    # actual ingestion pricing) via resolve_sku(), same as every other
+    # deterministic mapper in this file — not a bare passthrough.
     rows = [row(product="Amazon CloudWatch",
                 usage_type="LogBytes-Processed", unit="GB")]
     out = _with_sku(map_cloudwatch, rows)
     assert out[0]["gcp_service"] == "Cloud Logging"
-    assert out[0]["strategy"] == "passthrough"  # rate parity: $0.50/GiB on both clouds
+    assert out[0]["strategy"] == "map"
+    assert out[0]["gcp_sku_name"] == "Log Storage cost"
 
 
 def test_cloudwatch_metrics_passthrough():

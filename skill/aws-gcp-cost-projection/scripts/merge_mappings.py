@@ -35,6 +35,20 @@ try:
 except Exception:
     _SYNTHETIC_SKUS = set()
 
+# Every other synthetic ID apply_rates.py injects directly into gcp_sku_rates
+# (never present in catalog.duckdb's `skus` table by construction) must be
+# whitelisted here too, or this filter treats it as a phantom LLM-fabricated
+# ID and nulls it out, then apply_rates.py's word-overlap fallback silently
+# re-resolves it against the wrong catalog SKU instead. GCP-LOOKER-STUDIO-
+# PRO-USER is the only one left — Looker Studio Pro is billed as a separate
+# SaaS product genuinely outside GCP's Cloud Billing Catalog, so there's no
+# real catalog SKU it could ever resolve to dynamically. (Cloud Logging's
+# two synthetic IDs were removed once a real catalog SKU was found for
+# each — see apply_rates.py's comments at the same section.)
+_SYNTHETIC_SKUS |= {
+    "GCP-LOOKER-STUDIO-PRO-USER",
+}
+
 # Columns that can appear in a mapping JSON object.
 # Order matches the INSERT statement below.
 COLUMNS = [

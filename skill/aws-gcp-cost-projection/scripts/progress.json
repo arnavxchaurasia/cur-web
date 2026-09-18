@@ -1,0 +1,7 @@
+{
+  "phase": 4,
+  "phase_name": "Rate-Card Fill",
+  "last_activity": "Fetching GCP rates via script",
+  "status": "FAILED",
+  "error": "projection.duckdb not found \u2014 cannot fill rates"
+}

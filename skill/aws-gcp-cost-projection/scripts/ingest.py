@@ -9,6 +9,7 @@ import hashlib
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from log_utils import get_logger
 from region_prefix import decode_region_prefix
+from aws_normalizer import canonical_service as _canonical_service
 
 log = get_logger("ingest")
 
@@ -272,6 +273,10 @@ _PDF_ITEM_RE = re.compile(
     r'^(.*?)\s+([\d,]+(?:\.\d+)?)\s+([A-Za-z][A-Za-z0-9\-/]*)\s+USD\s+([\d,]+(?:\.\d+)?)\s*$')
 # A subtotal/header row: "<name> USD <amount>" with no usage qty/unit.
 _PDF_HDR_RE = re.compile(r'^(.+?)\s+USD\s+[\d,]+(?:\.\d+)?\s*$')
+# Subtotal lines like "Amazon Internet Monitor (769 Internet Monitor)" start with
+# "Amazon"/"AWS" just like real section headers, but carry an embedded parenthetical
+# quantity — reject those so they don't get mistaken for headers.
+_PDF_QUANTITY_PAREN_RE = re.compile(r'\(\d[\d,]*\s+[A-Za-z]')
 
 # The PDF prints its own post-discount subtotal(s) as "Total pre-tax USD <amt>"
 # (one per billing entity). Summing line items gives a GROSS figure (net of the
@@ -316,11 +321,90 @@ _PDF_RDS_STORAGE_RE = re.compile(
 # EFS backup/storage lines are explicitly labeled "for EFS" in the description.
 _PDF_EFS_RE = re.compile(r'for\s*efs\b', re.IGNORECASE)
 
+# Any AWS-Marketplace-billed third-party SaaS (Kiro, or any future vendor
+# billed the same way) never passes the header-validation guard below — its
+# section header doesn't start with "Amazon "/"AWS " and isn't in the AWS
+# alias table, both correctly, since it isn't an AWS-owned service — so
+# cur_service stays stuck on whichever real AWS section preceded it in the
+# PDF, and every one of that vendor's line items silently inherits that
+# unrelated service name (confirmed real: Kiro credit/subscription rows
+# labeled "Elastic Compute Cloud T3ACPUCredits"/"KMS ...-Requests" on
+# customer reports — cost correct, service label wrong). Unlike the
+# EBS/S3/RDS/EFS cases above, the fix can't be "trust the header" (there is
+# no valid AWS header to trust for a non-AWS product) — the item's own
+# description is the only reliable signal, and AWS Marketplace's per-unit
+# line format always names the billed product directly: "$<rate> per <unit>
+# for <ProductName> in <region> (<qty> <unit>)". Extract <ProductName>
+# generically from that shape instead of hardcoding one vendor's name, so
+# the next third-party product billed the same way (any AWS Marketplace
+# SaaS) is caught automatically rather than needing its own one-off regex.
+#
+# The extracted token must look like a real product identifier, not an
+# ordinary English phrase from an AWS-native description — AWS's own
+# descriptions never use "for <ProductName> in <region>" with a bare
+# CamelCase/hyphenated single token there (they say things like "for
+# instance usage" or "for EFS"). Requiring internal capitalisation or a
+# hyphen (KiroEnterprise-Credits, Some-Vendor-Pro, DataDogAPM, ...) is what
+# tells a real marketplace SKU name apart from ordinary description prose,
+# without hand-listing vendors.
+_PDF_MARKETPLACE_ITEM_RE = re.compile(
+    r'\bfor\s+([A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*)\s+in\s+[A-Za-z]')
+_PDF_LOOKS_LIKE_PRODUCT_NAME_RE = re.compile(r'-|[a-z][A-Z]')
+# AWS's own per-resource-scanned/per-rule billing (Inspector: "for
+# EC2-Scanning in ...", "for ECR-ImageScanning in ..."; WAF: "for
+# AMR-BotControl-Targeted-Request in ...") is genuine AWS-native phrasing
+# that happens to structurally match "for <hyphenated-token> in <region>"
+# just as well as a real marketplace vendor name does — hyphen-or-CamelCase
+# alone can't tell them apart. Confirmed real, twice, with two DIFFERENT
+# AWS abbreviations (EC2, then AMR): each time an Inspector/WAF row matched
+# this regex, its already-correct cur_service ("Amazon Inspector"/"AWS
+# WAF") got overwritten with the bogus product name, which then failed
+# every downstream service-specific detection and fell through to
+# marketplace_thirdparty passthrough — losing the real mapping (SCC
+# Premium, Cloud Armor Bot Control) entirely.
+#
+# A hand-listed prefix exclusion (EC2-, ECR-, ...) is exactly the kind of
+# vendor list this whole function was designed to avoid needing — it just
+# missed AMR- the first time, and will keep missing the next AWS
+# abbreviation (WAF, ACM, NAT, ...) the same way. The real structural tell:
+# AWS's own internal resource-type abbreviations are short (2-5 letters),
+# ALL-CAPS, acronym-shaped tokens (EC2, ECR, AMR, WAF, ACM) — a genuine
+# third-party vendor/product name is never spelled that way (KiroEnterprise,
+# DataDogAPM, Some-Vendor-Pro all mix case within the token). Excluding an
+# ALL-CAPS shape generically covers every AWS abbreviation without
+# hand-listing them one at a time.
+#
+# Checked against EVERY hyphen-separated segment, not just the first one —
+# confirmed real: "Global-AMR-AntiDDoS" (AWS WAF's flat monthly Anti-DDoS
+# fee) has the abbreviation ("AMR") in the MIDDLE segment, with an ordinary
+# mixed-case word ("Global") first. A first-segment-only check let this one
+# through the exact same false-positive path as EC2-Scanning and
+# AMR-BotControl-Targeted-Request before it — same root cause, just shifted
+# one position over, which is exactly why checking only the first segment
+# was never going to generalize.
+_PDF_AWS_ABBREV_SEGMENT_RE = re.compile(r'^[A-Z0-9]{2,5}$')
+
+def _pdf_marketplace_product(desc):
+    """Return the third-party product name embedded in a Marketplace-style
+    line-item description, or None if this doesn't look like one."""
+    m = _PDF_MARKETPLACE_ITEM_RE.search(desc)
+    if not m:
+        return None
+    name = m.group(1)
+    if not _PDF_LOOKS_LIKE_PRODUCT_NAME_RE.search(name):
+        return None
+    if any(_PDF_AWS_ABBREV_SEGMENT_RE.match(seg) for seg in name.split("-")):
+        return None
+    return name
+
 def _pdf_canonical_service(cur_service, desc):
     """Return the correct AWS service name for a PDF line item.
     EBS storage/IOPS descriptions bleed into the EC2 section header — remap them,
     but S3/RDS/EFS storage-class lines must NOT be caught by that (they price
     against a different GCP target than Persistent Disk)."""
+    marketplace_product = _pdf_marketplace_product(desc)
+    if marketplace_product:
+        return marketplace_product
     if _PDF_S3_CLASS_RE.search(desc):
         return "Amazon Simple Storage Service"
     # EFS check must precede the RDS "backup storage" catch-all: "warm backup
@@ -387,7 +471,27 @@ def _load_pdf(conn, path):
                         if _PDF_REGION_RE.match(name):
                             cur_region = name
                         elif len(name) > 3 and "total" not in name.lower():
-                            cur_service = name
+                            # Only trust this as a genuine service-section header if
+                            # it actually looks like an AWS product name (starts with
+                            # "Amazon "/"AWS ", or resolves via the same alias table
+                            # every other mapper trusts) — otherwise a stray line that
+                            # happens to structurally match "<text> USD <amount>"
+                            # (a wrapped header, footnote, or mis-extracted fragment)
+                            # would silently become cur_service and get carried onto
+                            # every following item line until a real header is next
+                            # matched, splicing one section's name onto another's
+                            # description (confirmed real: caused a service-name/
+                            # description mismatch on customer reports). Leaving
+                            # cur_service unchanged when a candidate fails this check
+                            # is strictly safer than accepting a bad one.
+                            if (re.match(r'^(amazon|aws)\s', name, re.IGNORECASE) or _canonical_service(name)) \
+                                    and not _PDF_QUANTITY_PAREN_RE.search(name):
+                                cur_service = name
+                            else:
+                                log.warning(
+                                    f"PDF header candidate {name!r} doesn't look like a real "
+                                    f"AWS service name — ignoring it, keeping cur_service={cur_service!r}"
+                                )
     except Exception as e:
         _fail(f"Could not parse the PDF ({e}). Export the CUR as CSV/Parquet instead.")
         return

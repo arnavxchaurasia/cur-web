@@ -8,6 +8,7 @@ import { ContactCard } from '../components/ContactCard'
 import { Reveal } from '../components/Reveal'
 import { getJob, getProgress, listJobs, downloadURL, refineJob, retryJob, getRuns, getSummary } from '../api/jobs'
 import type { Job, Progress, RunResult } from '../api/jobs'
+import { shareJob } from '../api/admin'
 import type { UserInfo } from '../api/auth'
 import { useTitle } from '../lib/useTitle'
 import { TOTAL_PHASES } from '../lib/phases'
@@ -266,6 +267,23 @@ export function JobStatus({ user }: Readonly<{ user: UserInfo }>) {
   const [refineError, setRefineError] = useState<string | null>(null)
   const [retrying, setRetrying] = useState(false)
   const [retryError, setRetryError] = useState<string | null>(null)
+  const [shareLink, setShareLink] = useState<string | null>(null)
+  const [sharing, setSharing] = useState(false)
+  const [shareError, setShareError] = useState<string | null>(null)
+
+  const handleShare = async () => {
+    if (!id) return
+    setSharing(true)
+    setShareError(null)
+    try {
+      const { url } = await shareJob(id)
+      setShareLink(`${window.location.origin}${url}`)
+    } catch (e: unknown) {
+      setShareError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSharing(false)
+    }
+  }
 
   const submitRetry = async () => {
     if (!id) return
@@ -381,8 +399,42 @@ export function JobStatus({ user }: Readonly<{ user: UserInfo }>) {
                 ↓ Download latest report
               </a>
 
+              <Reveal delay={100}>
+                <div className="bg-white/[0.02] border border-white/10 rounded-lg p-4 space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-[#00C2BB] uppercase tracking-wider">
+                        Share this report
+                      </h3>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        Create a read-only public link, valid for 30 days.
+                      </p>
+                    </div>
+                    <button
+                      onClick={handleShare}
+                      disabled={sharing}
+                      className="text-xs font-medium text-[#645DF6] hover:text-[#8981ff] whitespace-nowrap
+                        disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-150">
+                      {sharing ? 'Creating…' : shareLink ? 'Regenerate link' : 'Create link'}
+                    </button>
+                  </div>
+                  {shareError && <p className="text-xs text-orange-400">{shareError}</p>}
+                  {shareLink && (
+                    <input
+                      readOnly
+                      value={shareLink}
+                      onFocus={e => e.currentTarget.select()}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs font-mono text-gray-300"
+                    />
+                  )}
+                </div>
+              </Reveal>
+
               <Reveal delay={60}>
-                <RunHistory jobId={job.id} runs={runs} />
+                <div>
+                  <p className="text-xs uppercase tracking-wider text-gray-500 mb-2">Export history</p>
+                  <RunHistory jobId={job.id} runs={runs} />
+                </div>
               </Reveal>
 
               {!refineOpen ? (

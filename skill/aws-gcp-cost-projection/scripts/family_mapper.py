@@ -7,7 +7,7 @@ import duckdb
 
 # Add scripts directory to path to import resolve_sku
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from apply_static_mappings import resolve_sku, cheapest_in_scope, cheapest_gpu_in_scope, _no_rate_suffix, _family_hourly_rate, _gp_family_by_label, _strict_resolve_sku
+from apply_static_mappings import resolve_sku, cheapest_in_scope, cheapest_gpu_in_scope, _no_rate_suffix, _family_hourly_rate, _gp_family_by_label, _strict_resolve_sku, _GP_FAMILY_GENERATION
 
 DB_PATH = sys.argv[1] if len(sys.argv) > 1 else "projection-audit/projection.duckdb"
 MANIFEST_PATH = "projection-audit/phase2_manifest.json"
@@ -296,9 +296,18 @@ def map_gce_row(r, parsed):
     if not arm_sku:
         default_label = gcp_family
         tiers = ("burstable", "sustained") if is_burstable else ("sustained",)
+        # Burstable rows (default_label="E2", gen 2) must floor any cost-tier
+        # switch against N4D's generation (4), not E2's own — same fix as
+        # apply_static_mappings.py's map_compute_burstable/map_msk, applied
+        # here too since this is the rare safety-net path a burstable EC2 row
+        # takes when it isn't caught upstream by classify_mechanics.py first.
+        # Without it, N2D AMD/T2D AMD (also gen 2) cleared the floor and won
+        # on price alone — the legacy-hardware substitution the floor exists
+        # to prevent.
+        min_gen = _GP_FAMILY_GENERATION.get("N4D", 4) if is_burstable else None
         switched_family, core_desc, ram_desc, switched, reason = cheapest_in_scope(
             default_label, vcpus, ram, gcp_region, archs=("x86",), tiers=tiers, workloads=workloads,
-            min_network_tier=min_network_tier)
+            min_network_tier=min_network_tier, min_generation=min_gen)
         if switched:
             gcp_family = switched_family
             cost_tag = (f" [cost-tier: {switched_family} cheaper here, same/better tier]" if reason == "cheaper"

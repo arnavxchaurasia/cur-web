@@ -119,12 +119,27 @@ RULES = [
             or _ilike(r["operation"], "AWS Support")
             # Third-party bandwidth resellers have no GCP equivalent — no "Amazon"/"AWS"
             # prefix means it's a marketplace product, not a native AWS service.
+            # Exception: PDF/flat-CSV bills use product="Bandwidth" for native EC2
+            # internet egress too. Those rows describe themselves as "data transfer out"
+            # in the operation/description field — route them to data_transfer instead.
             or (r.get("product", "").strip() == "Bandwidth"
                 and not _ilike(r.get("product", ""), "Amazon")
-                and not _ilike(r.get("product", ""), "AWS"))
+                and not _ilike(r.get("product", ""), "AWS")
+                and not _re(r.get("operation", ""), r"data transfer (out|in)|per gb.{0,30}transfer|transfer.{0,30}per gb"))
             # EC2 burstable CPU credits (t2/t3/t4g CPUCredits) have no GCP equivalent
             # (E2 has no burst-credit billing model). Ignore rather than mismap.
+            # Checked against `product` too, not just `usage_type` — confirmed
+            # real bug, same class as every other PDF-bill field-location miss
+            # this session: PDF bills carry "T3ACPUCredits" in `product`
+            # ("Amazon Elastic Compute Cloud T3ACPUCredits") with `usage_type`
+            # left empty, so the usage_type-only check silently never matched
+            # on PDF bills, sending these rows to the LLM-only `misc` bucket
+            # instead of this deterministic $0 classification — despite this
+            # being a slam-dunk, always-correct case with zero judgment call
+            # involved (no GCP burstable family has a credit-billing concept
+            # at all, ever, regardless of customer specifics).
             or _re(r.get("usage_type", ""), r"CPUCredits?")
+            or _re(r.get("product", ""), r"CPUCredits?")
             # ingest.py's materiality filter re-inserts the sum of dropped
             # low-materiality rows as this exact synthetic row so the bill
             # total still reconciles — route it to passthrough at cost parity,
@@ -170,7 +185,15 @@ RULES = [
                 or _ilike(r["product"], "EC2")
                 or _ilike(r["product"], "Compute Cloud")
             )
-            and _re(r.get("usage_type", ""), r"BoxUsage:t[234][ag]?\.")
+            and (
+                _re(r.get("usage_type", ""), r"BoxUsage:t[234][ag]?\.")
+                # PDF/flat-CSV bills leave usage_type blank; fall back to the
+                # operation field which carries the instance type as a substring
+                # (e.g. "... t2.xlarge instance ...").
+                or (not r.get("usage_type")
+                    and _re(r.get("operation", ""),
+                            r"t[234][ag]?\.(nano|micro|small|medium|large|\d*xlarge)"))
+            )
             # PDF/flat-CSV bills routinely leave pricing_unit/unit blank (this
             # gap is already documented and worked around elsewhere in this
             # file — managed_db, msk, block_storage) — without accepting "",
@@ -409,6 +432,10 @@ RULES = [
         lambda r: (
             _ilike(r["product"], "DataTransfer")
             or _ilike(r["product"], "Data Transfer")
+            # PDF/flat bills use product="Bandwidth" for native EC2 internet egress.
+            # Only route here when the operation describes a real data-transfer charge.
+            or (r.get("product", "").strip() == "Bandwidth"
+                and _re(r.get("operation", ""), r"data transfer (out|in)|per gb.{0,30}transfer|transfer.{0,30}per gb"))
             or _re(r["usage_type"], r"DataTransfer|Data Transfer|NatGateway-Bytes|TransitGateway-Bytes|LCUUsage|LoadBalancer-Bytes")
             or _re(r["operation"], r"TransitGateway-Bytes")
             # LCU (Load Balancer Capacity Unit) data-processing charge. CUR format
@@ -431,6 +458,22 @@ RULES = [
             # have "NatGateway-Hours" in usage_type and stay in flat_hourly.
             or (_ilike(r["product"], "NatGateway")
                 and not r.get("usage_type"))
+            # PDF ingestion for CloudFront bills groups per-request rows AND the
+            # sibling "Bandwidth" sub-section's per-GB egress rows under the SAME
+            # product label (confirmed real: "Amazon CloudFront IN-Requests-Tier2-
+            # HTTPS" was used as `product` for both the genuine per-request charge
+            # AND its region's per-GB data-transfer-out rows — the raw PDF has them
+            # under separate "Any"/"Bandwidth" headers, but the ingest step loses
+            # that grouping). The "Requests" substring in that shared label would
+            # otherwise route these egress rows into per_request, where
+            # CloudFront's per-request ignore branch zeroes them out as "no fair
+            # per-request GCP charge" — wrong, since these rows are real billable
+            # egress, not a request charge. `operation` is the authoritative signal:
+            # a genuine per-GB data-transfer-out charge always states so explicitly,
+            # regardless of what the mislabeled product field says.
+            or (_ilike(r.get("product", ""), "CloudFront")
+                and _re(r.get("operation", ""),
+                        r"per gb.{0,40}data transfer (out|in)|data transfer (out|in).{0,40}per gb"))
         ),
     ),
     (
@@ -529,6 +572,25 @@ RULES = [
                     (_re(r["product"], r"\bS3\b") or _ilike(r["product"], "Simple Storage"))
                     and not r["unit"] in ("GB-Mo", "GB Month", "GB-Month")
                     and not _re(r["usage_type"], r"TimedStorage|ByteHrs")
+                    # Storage-class rows (Glacier IR/Flexible/Deep Archive,
+                    # Intelligent-Tiering) with blank usage_type/unit — the PDF/
+                    # simplified-CUR gap this whole branch exists for — must still
+                    # fall through to object_storage rather than land here, or the
+                    # storage GB-month gets classified (and therefore priced) as an
+                    # unidentifiable per-request charge instead of a GCS storage
+                    # class, while a request line for the exact same storage class
+                    # correctly reaches object_storage's operation check. Only
+                    # exclude when operation names a storage class WITHOUT also
+                    # naming a request concept, so genuine Glacier/Intelligent-
+                    # Tiering REQUEST rows still land here. NB: match "Request"
+                    # only, not "Retrieval" — "Glacier Instant Retrieval" is the
+                    # storage class's own proper name and contains "Retrieval"
+                    # even on pure-storage rows; using it here would exclude
+                    # every GIR storage row right back into misclassification.
+                    and not (
+                        _re(r["operation"], r"Infrequent Access|Glacier|Intelligent-Tiering|Deep Archive")
+                        and not _re(r["operation"], r"Request|Data Returned|Select")
+                    )
                 )
             )
             and not any(
@@ -582,6 +644,35 @@ RULES = [
         ),
     ),
     (
+        # Amazon Inspector (EC2/ECR/Lambda vulnerability scanning) → static
+        # passthrough to Security Command Center Premium. Same reasoning as the
+        # guardduty rule directly above: Inspector bills per-resource-scanned
+        # (e.g. Inspector-ECR-ImageScanning, Inspector-EC2-Scanning) while SCC
+        # Premium bills per-asset-under-management/mo — incompatible units, so
+        # a real rate conversion would be invented precision. Kept as its own
+        # group (rather than folded into "guardduty") so the static mapper can
+        # carry an Inspector-specific note and label.
+        "inspector",
+        lambda r: (
+            _ilike(r["product"], "Inspector")
+            or _ilike(r["product"], "AmazonInspector")
+        ),
+    ),
+    (
+        # QuickSight → Looker Studio Pro. Unlike GuardDuty/Inspector, QuickSight's
+        # CUR usage_type strings directly encode role + edition (Author vs Reader,
+        # Standard vs Enterprise/Pro) and the row quantity IS the per-user or
+        # per-session count (standard, documented AWS billing behavior — not an
+        # inference). That's a real, defensible per-unit conversion, so QuickSight
+        # gets its own deterministic static mapper (map_quicksight) instead of a
+        # blanket passthrough.
+        "quicksight",
+        lambda r: (
+            _ilike(r["product"], "QuickSight")
+            or _ilike(r["product"], "AmazonQuickSight")
+        ),
+    ),
+    (
         # Redshift → BigQuery static mapper. Node hours are converted to BQ slot-hours
         # using the slot-per-node table in apply_static_mappings.py. Backup/snapshot
         # rows pass through. Falls through to misc only if instance type is unrecognized.
@@ -625,6 +716,37 @@ RULES = [
         ),
     ),
     (
+        # Route 53 DNS query charges → Cloud DNS. PDF-format bills set unit=None
+        # so this must match by product name, not unit. Route 53 and Cloud DNS
+        # are at cost parity ($0.40/M for first 1B queries, $0.20/M thereafter).
+        "per_request",
+        lambda r: (
+            _ilike(r["product"], "Route 53")
+            or _re(r.get("usage_type", ""), r"Route53|DNS-Queries")
+        ),
+    ),
+    (
+        # AWS WAF per-request charges (standard WAF, BotControl, AntiDDoS-Request,
+        # BotControl-Targeted-Request). PDF bills leave unit=None so we can't
+        # rely on unit="Requests" — catch by product name before misc fallback.
+        # The existing Cloud Armor mapping logic in map_per_request handles these.
+        "per_request",
+        lambda r: (
+            _re(r.get("product", ""), r"AWS WAF")
+            and not _re(r.get("usage_type", "") + r.get("operation", ""),
+                        r"WebACL-Hour|Rule-Hour|Web ACL|WAF Rule|\bMonth\b")
+        ),
+    ),
+    (
+        # AWS WAF flat monthly fees (BotControl per-month, AntiDDoS per-month).
+        # PDF bills leave unit=None; matched by product + "Month" in operation.
+        "flat_hourly",
+        lambda r: (
+            _re(r.get("product", ""), r"AWS WAF")
+            and _re(r.get("operation", ""), r"\bMonth\b")
+        ),
+    ),
+    (
         "object_storage",
         lambda r: (
             (
@@ -656,8 +778,42 @@ RULES = [
                 (r["unit"] in ("GB-Mo", "GB Month", "GB-Month")
                  and not _re(r["operation"], r"Request|Retrieval|Data Returned|Select"))
                 or _re(r["usage_type"], r"TimedStorage|ByteHrs")
+                # PDF/simplified-CUR bills leave both unit and usage_type blank —
+                # for those, operation naming a storage class (and not a request)
+                # is the only signal available at all. Without this, a blank-
+                # field Glacier/Intelligent-Tiering/Deep-Archive STORAGE row can't
+                # satisfy either branch above and gets excluded from per_request's
+                # blank-usage_type catch-all for the identical reason, landing
+                # nowhere and going unpriced. Symmetric with the exclusion added
+                # to that per_request branch. NB: match "Request" only, not
+                # "Retrieval" — "Glacier Instant Retrieval" is the storage
+                # class's own proper name and contains "Retrieval" even on
+                # pure-storage rows.
+                or (
+                    _re(r["operation"], r"Infrequent Access|Glacier|Intelligent-Tiering|Deep Archive")
+                    and not _re(r["operation"], r"Request|Data Returned|Select")
+                )
             )
         ),
+    ),
+    (
+        # AWS Marketplace third-party SaaS, billed through AWS but not an
+        # AWS-owned service (Kiro today; any future vendor billed the same
+        # way tomorrow) — no GCP equivalent exists or could exist, since it
+        # isn't Google's product to offer. Deliberately last in RULES: every
+        # real AWS service is checked by a more specific rule above first, so
+        # this only ever catches a product name that (a) isn't AWS-branded
+        # ("Amazon "/"AWS " prefix — the same signal ingest.py's PDF header
+        # guard trusts to tell a real AWS section from a stray line) and (b)
+        # wasn't recognized by any earlier rule. That combination is a
+        # reliable third-party-SaaS signal, not a guess: a genuine AWS
+        # service that's merely missing its own dedicated rule would still
+        # carry the "Amazon "/"AWS " prefix and so would NOT match here — it
+        # falls through to misc instead, same as before this rule existed,
+        # so this can't accidentally swallow an unclassified real AWS
+        # service into an incorrect "no GCP equivalent" passthrough.
+        "marketplace_thirdparty",
+        lambda r: bool(r["product"]) and not re.match(r'^(amazon|aws)\b', r["product"], re.IGNORECASE),
     ),
 ]
 
@@ -1029,7 +1185,7 @@ def main():
         "commitment_discount", "negative_cost",
         "flat_hourly", "object_storage", "per_request",
         "block_storage", "data_transfer", "non_workload", "cloudwatch",
-        "guardduty", "redshift", "athena", "kinesis", "efs", "xray", "fsx", "emr", "elasticache", "msk",
+        "guardduty", "inspector", "marketplace_thirdparty", "quicksight", "redshift", "athena", "kinesis", "efs", "xray", "fsx", "emr", "elasticache", "msk",
         # compute_windows/compute_arm/compute_burstable each have a dedicated static
         # handler in apply_static_mappings.py that always emits an output entry (map
         # or passthrough fallback) for every row — same shape as the other

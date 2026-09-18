@@ -24,7 +24,32 @@ CREATE TABLE IF NOT EXISTS jobs (
     agent_pid INTEGER DEFAULT 0,
     attempts   INTEGER DEFAULT 1,
     created_at DATETIME DEFAULT (datetime('now')),
+    updated_at DATETIME DEFAULT (datetime('now')),
+    cancelled_at DATETIME
+);
+
+CREATE TABLE IF NOT EXISTS users (
+    email      TEXT PRIMARY KEY,
+    role       TEXT NOT NULL DEFAULT 'viewer',
+    created_at DATETIME DEFAULT (datetime('now')),
     updated_at DATETIME DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS admin_audit (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    actor_email TEXT NOT NULL,
+    action      TEXT NOT NULL,
+    target_id   TEXT,
+    details     TEXT,
+    created_at  DATETIME DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS report_shares (
+    token      TEXT PRIMARY KEY,
+    job_id     TEXT NOT NULL,
+    created_by TEXT,
+    created_at DATETIME DEFAULT (datetime('now')),
+    expires_at DATETIME
 );`
 
 func Open(path string) (*DB, error) {
@@ -46,6 +71,7 @@ func Open(path string) (*DB, error) {
 		`ALTER TABLE jobs ADD COLUMN session_id TEXT`,
 		`ALTER TABLE jobs ADD COLUMN agent_pid INTEGER DEFAULT 0`,
 		`ALTER TABLE jobs ADD COLUMN attempts INTEGER DEFAULT 1`,
+		`ALTER TABLE jobs ADD COLUMN cancelled_at DATETIME`,
 	} {
 		if _, err := conn.Exec(ddl); err != nil {
 			msg := err.Error()

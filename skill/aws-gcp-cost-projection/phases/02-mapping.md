@@ -477,7 +477,7 @@ following this checklist. Skim every row against every rule:
     - If `license_model = 'License Included'`, map to GCP license-included SKUs.
 8. **Workload Class Specific Routing Rules.**
     Read the `workload_class` column in `aws_li_catalog` and apply strict family gates:
-    - **Burstable:** Map burstable x86 instances (`t2`, `t3`, `t3a`) to GCP **E2** (`e2-micro`, `e2-small`, `e2-medium` or custom/predefined E2). Map burstable ARM instances (`t4g`) strictly to **Tau T2A** (`t2a-standard-*`).
+    - **Burstable:** For burstable x86 instances (`t2`, `t3`, `t3a`), compare real per-region rates across **E2**, **N2**, and **N2D AMD** and pick the cheapest (§256) — AWS CPU credits are a performance mechanism, not a price discount, so a cheaper sustained x86 family is never a worse deal and the swap is always disclosed inline. Map burstable ARM instances (`t4g`) strictly to **Tau T2A** (`t2a-standard-*`) — never silently cross ARM/x86.
     - **ARM:** Map general-purpose/memory-optimized ARM workloads (`m6g`, `r6g`, etc.) strictly to **Tau T2A** (Tau ARM) to align with cost/performance parity. Only map to **C4A** (Axion) for highly-intensive compute workloads, and fall back to N2D only if ARM is unavailable in the target region.
     - **Memory-Optimized:** Enforce RAM-to-vCPU ratio $\ge 8:1$ (e.g. `n2-highmem-4` or custom shapes with $\ge 8:1$ memory ratio).
     - **GPU:** Map to `g2` (L4) or `a2` (A100) shapes, matching physical GPU counts and RAM exactly.

@@ -24,7 +24,7 @@ SKILL_DIR = os.environ.get("SKILL_DIR", os.path.dirname(os.path.dirname(os.path.
 SCRIPTS_DIR = os.path.join(SKILL_DIR, "scripts")
 META_PATH   = os.path.join(SKILL_DIR, "data", "CATALOG_META.json")
 
-REFRESH_DAYS = 365
+REFRESH_DAYS = 7
 
 
 def _days_since(iso: str) -> float:

@@ -23,28 +23,28 @@
 
   "gcp_families": {
     "general": {
-      "intel": { "family": "N4",  "arm_sku": false, "min_aws_gen": 6, "prev_gen_family": "N2" },
-      "amd":   { "family": "N2D AMD", "arm_sku": false },
+      "intel": { "family": "N4",  "arm_sku": false },
+      "amd":   { "family": "N4D", "arm_sku": false },
       "arm":   { "family": "C4A", "arm_sku": true  }
     },
     "compute": {
-      "intel": { "family": "C3",     "arm_sku": false, "min_aws_gen": 6, "prev_gen_family": "C2D AMD" },
-      "amd":   { "family": "C2D AMD", "arm_sku": false },
-      "arm":   { "family": "C4A",    "arm_sku": true  }
+      "intel": { "family": "C4",  "arm_sku": false },
+      "amd":   { "family": "C4D", "arm_sku": false },
+      "arm":   { "family": "C4A", "arm_sku": true  }
     },
     "memory": {
-      "intel": { "family": "N4",  "arm_sku": false, "min_aws_gen": 6, "prev_gen_family": "N2" },
-      "amd":   { "family": "N2D AMD", "arm_sku": false },
+      "intel": { "family": "N4",  "arm_sku": false },
+      "amd":   { "family": "N4D", "arm_sku": false },
       "arm":   { "family": "C4A", "arm_sku": true  }
     },
     "burstable": {
       "intel": { "family": "E2",  "arm_sku": false },
       "amd":   { "family": "E2",  "arm_sku": false },
-      "arm":   { "family": "T2A", "arm_sku": true  }
+      "arm":   { "family": "C4A", "arm_sku": true  }
     },
     "storage": {
-      "intel": { "family": "N4",  "arm_sku": false, "min_aws_gen": 6, "prev_gen_family": "N2" },
-      "amd":   { "family": "N2D AMD", "arm_sku": false },
+      "intel": { "family": "N4",  "arm_sku": false },
+      "amd":   { "family": "N4D", "arm_sku": false },
       "arm":   { "family": "C4A", "arm_sku": true  }
     }
   },
@@ -53,7 +53,7 @@
     "g": [
       {
         "max_gen": 4,
-        "family": "N1",
+        "family": "N1 Predefined",
         "gpu_desc": "Nvidia Tesla T4 GPU running in",
         "gpu_per_vcpu": 0.25,
         "min_count": 1

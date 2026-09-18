@@ -46,24 +46,60 @@ _DATA_DIR = os.path.join(
 )
 
 _BUILTIN_CANDIDATE_FAMILIES = {
-    # x86_64 general/compute-optimized (≤4 GB/vCPU): N2D AMD.
-    # Best price-performance for c/m-family workloads on GCP. ~30% cheaper than N2.
+    # x86_64 4th-gen general-purpose Intel: N4 (preferred default).
+    # Sapphire Rapids; 8 GB/vCPU standard, available in all major regions.
+    # Preferred over N2 for general and memory-optimised workloads.
+    "N4": {
+        "family": "n4",
+        "architecture": "x86_64",
+        "generation": 4,
+        "min_vcpu": 2,
+        "max_vcpu": 208,
+        "ram_per_vcpu": 8,
+        "local_nvme": False,
+        "network_tier": "high",
+    },
+    # x86_64 4th-gen compute-optimized Intel: C4.
+    # GCP's current-gen c-family target; slightly better price/perf than C3.
+    "C4": {
+        "family": "c4",
+        "architecture": "x86_64",
+        "generation": 4,
+        "min_vcpu": 2,
+        "max_vcpu": 192,
+        "ram_per_vcpu": 4,
+        "local_nvme": False,
+        "network_tier": "high",
+    },
+    # x86_64 4th-gen compute-optimized AMD: C4D.
+    # GCP's current-gen AMD c-family target; ~10% cheaper than C4 Intel.
+    "C4D": {
+        "family": "c4d",
+        "architecture": "x86_64",
+        "generation": 4,
+        "min_vcpu": 2,
+        "max_vcpu": 192,
+        "ram_per_vcpu": 4,
+        "local_nvme": False,
+        "network_tier": "high",
+    },
+    # x86_64 general/compute-optimized (≤4 GB/vCPU): N2D AMD (2nd gen fallback).
     "N2D": {
         "family": "n2d",
         "architecture": "x86_64",
+        "generation": 2,
         "min_vcpu": 2,
         "max_vcpu": 224,
         "ram_per_vcpu": 4,
         "local_nvme": False,
         "network_tier": "high",
     },
-    # x86_64 memory-optimized (8 GB/vCPU): N2 Intel.
-    # Used for AWS r5/r6i/r6a/r7i/r7a families. N2D only offers 4 GB/vCPU —
-    # sizing an r5.2xlarge (64 GB) as N2D would double vCPUs to 16 and inflate
-    # cost. N2 standard is 8 GB/vCPU and available in all major GCP regions.
+    # x86_64 memory-optimized (8 GB/vCPU): N2 Intel (2nd gen fallback).
+    # Kept as fallback for regions where N4 is unavailable.
     "N2": {
         "family": "n2",
         "architecture": "x86_64",
+        "generation": 2,
         "min_vcpu": 2,
         "max_vcpu": 128,
         "ram_per_vcpu": 8,
@@ -71,11 +107,11 @@ _BUILTIN_CANDIDATE_FAMILIES = {
         "network_tier": "high",
     },
     # x86_64 ultra-memory (16 GB/vCPU): M3 Intel.
-    # Used for AWS x1e/x2i families (16 GB/vCPU). Available in major regions
-    # including asia-south1 (Mumbai). M1/M2 are legacy; M3 is current gen.
+    # Used for AWS x1e/x2i families (16 GB/vCPU). M1/M2 are legacy; M3 is current gen.
     "M3": {
         "family": "m3",
         "architecture": "x86_64",
+        "generation": 3,
         "min_vcpu": 4,
         "max_vcpu": 128,
         "ram_per_vcpu": 16,
@@ -87,6 +123,7 @@ _BUILTIN_CANDIDATE_FAMILIES = {
     "E2": {
         "family": "e2",
         "architecture": "x86_64",
+        "generation": 2,
         "min_vcpu": 2,
         "max_vcpu": 32,
         "ram_per_vcpu": 8,
@@ -94,13 +131,12 @@ _BUILTIN_CANDIDATE_FAMILIES = {
         "network_tier": "standard",
         "burstable": True,
     },
-    # arm64 (Graviton): C4A Axion — preferred over T2A.
-    # Available in 28 regions including asia-south1 (Mumbai). T2A is only 5
-    # regions. C4A is the GCP-intended Graviton analogue; standard shape is
-    # 4 GB/vCPU (c4a-standard), highmem is 8 GB/vCPU (c4a-highmem).
+    # arm64 (Graviton): C4A Axion — 4th-gen, preferred for all arm workloads.
+    # Available in 28 regions. Standard shape is 4 GB/vCPU.
     "C4A": {
         "family": "c4a",
         "architecture": "arm64",
+        "generation": 4,
         "min_vcpu": 1,
         "max_vcpu": 72,
         "ram_per_vcpu": 4,
@@ -111,6 +147,7 @@ _BUILTIN_CANDIDATE_FAMILIES = {
     "C4A_HIGHMEM": {
         "family": "c4a",
         "architecture": "arm64",
+        "generation": 4,
         "min_vcpu": 1,
         "max_vcpu": 72,
         "ram_per_vcpu": 8,
@@ -121,6 +158,7 @@ _BUILTIN_CANDIDATE_FAMILIES = {
     "T2A": {
         "family": "t2a",
         "architecture": "arm64",
+        "generation": 1,
         "min_vcpu": 1,
         "max_vcpu": 48,
         "ram_per_vcpu": 4,
@@ -201,7 +239,7 @@ def load_candidate_families(path: str = "candidate_families.yaml") -> dict:
     Tries the given path first (for backward compatibility when the caller passes
     an explicit path), then tries the canonical data directory path
     (.../data/candidate_families.yaml). Falls back to a minimal built-in dict
-    covering the three core families (N2D, E2, T2A) so the module is functional
+    covering the core families (N2D, N2, M3, E2, C4, C4D, C4A) so the module is functional
     without any YAML file present.
     """
     canonical = os.path.join(_DATA_DIR, "candidate_families.yaml")
@@ -409,7 +447,7 @@ def score_candidates(profile: dict, scored: list[ScoredCandidate]) -> list[Score
         mem_fit = req_mem / sc.sized_memory_gb if sc.sized_memory_gb else 0
         capacity_fit = (vcpu_fit + mem_fit) / 2
 
-        generation_score = min(c.generation / 6, 1.0)
+        generation_score = min(c.generation / 4, 1.0)
         exact_bonus = 1.0 if c.exact_gpu_match else 0.7
 
         score = round((0.5 * capacity_fit) + (0.3 * generation_score) + (0.2 * exact_bonus), 3)
@@ -539,14 +577,12 @@ def resolve_compute_family(
         elif any(prefix.startswith(b) for b in ("t2", "t3", "t3a")):
             base_family = "E2"
         else:
-            # Choose x86 family by RAM/vCPU ratio to avoid over-provisioning
+            # Choose x86 family by RAM/vCPU ratio, preferring 4th-gen families.
             ram_per_vcpu = ram_gb / max(vcpu, 1)
             if ram_per_vcpu >= 12:
-                base_family = "M3"    # x1e/x2i ≥16 GB/vCPU → M3 ultramem
-            elif ram_per_vcpu >= 6:
-                base_family = "N2"    # r5/r6i/r7i 8 GB/vCPU → N2 standard
+                base_family = "M3"    # x1e/x2i ≥16 GB/vCPU → M3 ultramem (no 4th-gen equivalent)
             else:
-                base_family = "N2D"   # c/m family ≤4 GB/vCPU → N2D (best price)
+                base_family = "N4"    # general + memory-optimised → N4 (4th-gen Intel, 8 GB/vCPU)
 
     # ── Build a minimal profile dict ─────────────────────────────────────
     profile = {
@@ -586,7 +622,7 @@ def resolve_compute_family(
     synthetic_candidate = Candidate(
         family=fdef["family"],
         architecture=fdef["architecture"],
-        generation=2,
+        generation=fdef.get("generation", 2),
         local_nvme=fdef.get("local_nvme", False),
         network_tier=fdef.get("network_tier", "standard"),
         gb_per_vcpu=float(fdef.get("ram_per_vcpu", 4)),

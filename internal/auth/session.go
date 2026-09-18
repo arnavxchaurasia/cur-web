@@ -22,15 +22,24 @@ const cookieTTL = 8 * time.Hour
 type Session struct {
 	Email    string `json:"email"`
 	Name     string `json:"name"`
+	// Role is the RBAC role resolved from the `users` table at login time
+	// ("viewer", "admin", "facets"). May be empty for sessions issued before
+	// this field existed (decoded from an old cookie) — treat empty as
+	// "viewer" everywhere it's read.
+	Role     string `json:"role,omitempty"`
 	IssuedAt int64  `json:"iat,omitempty"`
 }
 
-// IsAdmin reports whether this session's email is in the admin allow-list.
-// adminEmails entries are expected to be lowercased already (parseAdminEmails
-// does that at startup). Comparison is case-insensitive on the session side.
+// IsAdmin reports whether this session's email is in the admin allow-list OR
+// its resolved RBAC Role is "admin". adminEmails entries are expected to be
+// lowercased already (parseAdminEmails does that at startup). Comparison is
+// case-insensitive on the session side.
 func (s *Session) IsAdmin(adminEmails []string) bool {
 	if s == nil {
 		return false
+	}
+	if s.Role == "admin" {
+		return true
 	}
 	email := strings.ToLower(s.Email)
 	for _, a := range adminEmails {
@@ -39,6 +48,18 @@ func (s *Session) IsAdmin(adminEmails []string) bool {
 		}
 	}
 	return false
+}
+
+// IsFacetsEmployee reports whether this session's email is on the
+// @facets.cloud domain. Gates the internal-only portfolio-summary/logs
+// panel — separate from IsAdmin, since admin access and Facets-employee
+// status aren't the same grant (an admin email could be a customer domain
+// in some deployments, and vice versa isn't assumed either).
+func (s *Session) IsFacetsEmployee() bool {
+	if s == nil {
+		return false
+	}
+	return strings.HasSuffix(strings.ToLower(s.Email), "@facets.cloud")
 }
 
 type SessionManager struct {

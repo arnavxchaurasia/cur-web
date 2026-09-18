@@ -101,13 +101,86 @@ select:focus {
 /* ── Login page background ──────────────────────────────────── */
 .login-bg {
   background:
-    radial-gradient(ellipse 90% 55% at 50% -5%,  rgba(100,93,246,0.2)  0%, transparent 65%),
-    radial-gradient(ellipse 55% 45% at 85% 85%,  rgba(0,194,187,0.12) 0%, transparent 55%),
-    #0a0a0f;
+    radial-gradient(ellipse 100% 65% at 50% 0%,   rgba(100,93,246,0.32) 0%, transparent 62%),
+    radial-gradient(ellipse 70% 55% at 100% 100%, rgba(0,194,187,0.2)  0%, transparent 58%),
+    linear-gradient(160deg, #16131f 0%, #0e0d14 55%, #0a0a0f 100%);
 }
 .login-orb {
   animation: float-orb 12s ease-in-out infinite;
   will-change: transform;
+}
+/* A small dot drops from above and lands on the glyph, in a loop — echoes
+   the reference Facets login page's falling-dot-into-glyph motif. */
+.login-drop-line {
+  position: absolute;
+  top: -70px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 1px;
+  height: 70px;
+  background: linear-gradient(to bottom, transparent, rgba(0,194,187,0.7));
+}
+.login-drop-dot {
+  position: absolute;
+  top: -70px;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+  border-radius: 50%;
+  background: #00C2BB;
+  box-shadow: 0 0 10px 2px rgba(0,194,187,0.8);
+  animation: drop-fall 3.2s cubic-bezier(0.55,0,0.85,0.35) infinite;
+}
+@keyframes drop-fall {
+  0%   { transform: translateY(0);   opacity: 0; }
+  8%   { opacity: 1; }
+  55%  { transform: translateY(70px); opacity: 1; }
+  60%  { transform: translateY(70px); opacity: 0; }
+  100% { transform: translateY(70px); opacity: 0; }
+}
+.login-glyph-wrap {
+  animation: glyph-pulse 3.2s ease-in-out infinite;
+}
+@keyframes glyph-pulse {
+  0%, 55%   { filter: drop-shadow(0 0 0 rgba(0,194,187,0)); transform: scale(1); }
+  62%       { filter: drop-shadow(0 0 18px rgba(0,194,187,0.65)); transform: scale(1.04); }
+  75%, 100% { filter: drop-shadow(0 0 0 rgba(0,194,187,0)); transform: scale(1); }
+}
+@keyframes gradient-shimmer {
+  0%, 100% { background-position: 0% 50%; }
+  50%      { background-position: 100% 50%; }
+}
+.login-gradient-text {
+  background: linear-gradient(90deg, #645DF6, #00C2BB, #645DF6);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: gradient-shimmer 6s ease-in-out infinite;
+}
+@keyframes rise-fade {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.login-feature {
+  animation: rise-fade 0.6s cubic-bezier(0.22,1,0.36,1) both;
+}
+@keyframes eyebrow-glow {
+  0%, 100% { opacity: 0.75; letter-spacing: 0.3em; }
+  50%      { opacity: 1;    letter-spacing: 0.34em; }
+}
+.login-eyebrow {
+  animation: rise-fade 0.6s cubic-bezier(0.22,1,0.36,1) both,
+             eyebrow-glow 3.2s ease-in-out 0.6s infinite;
+}
+@keyframes dot-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(100,93,246,0.5); transform: scale(1); }
+  50%      { box-shadow: 0 0 0 4px rgba(100,93,246,0); transform: scale(1.3); }
+}
+.login-feature-dot {
+  animation: rise-fade 0.6s cubic-bezier(0.22,1,0.36,1) both,
+             dot-pulse 2.4s ease-in-out infinite;
 }
 
 /* ── Card hover lift ────────────────────────────────────────── */
@@ -173,11 +246,15 @@ select:focus {
 @media (prefers-reduced-motion: reduce) {
   .anim-fade-in-up, .anim-fade-in, .anim-slide-down,
   .anim-scale-in, .anim-glow-breathe, .btn-shimmer,
-  .phase-bar-done, .login-orb {
+  .phase-bar-done, .login-orb,
+  .login-gradient-text, .login-feature,
+  .login-drop-dot, .login-glyph-wrap,
+  .login-eyebrow, .login-feature-dot {
     animation: none !important;
     opacity: 1 !important;
     transform: none !important;
   }
+  .login-drop-line, .login-drop-dot { display: none !important; }
   .reveal, .reveal.reveal-visible { opacity: 1; transform: none; transition: none; }
   .card-lift:hover { transform: none; box-shadow: none; }
   .dropzone-drag   { animation: none; transform: none; }

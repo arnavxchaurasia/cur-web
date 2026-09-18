@@ -138,5 +138,21 @@ LEFT JOIN passthrough_rank pr ON pr.row_id = m.rowid;
 
 def create_projection_view(conn):
     """(Re)create the gcp_projection VIEW. Requires aws_li_catalog,
-    aws_li_to_gcp_li, and gcp_sku_rates to exist. Idempotent."""
+    aws_li_to_gcp_li, and gcp_sku_rates to exist. Idempotent.
+
+    Older job databases (predating the switch to a VIEW-based design) can
+    still have gcp_projection as a materialized TABLE — "CREATE OR REPLACE
+    VIEW" fails hard against an existing base table of a different object
+    type (confirmed real: a live job's apply_rates.py run silently produced
+    zero priced rows because this raised and the caller swallowed it,
+    leaving every row's rate_source as 'unknown'). Drop a stale table first
+    so re-running the pipeline against an old job dir self-heals instead of
+    failing this way every time.
+    """
+    conn.execute("""
+        SELECT table_type FROM information_schema.tables WHERE table_name = 'gcp_projection'
+    """)
+    row = conn.fetchone()
+    if row and row[0] == "BASE TABLE":
+        conn.execute("DROP TABLE gcp_projection")
     conn.execute(_PROJECTION_VIEW_SQL)

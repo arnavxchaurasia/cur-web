@@ -36,12 +36,6 @@ export async function listJobs(): Promise<Job[]> {
   return res.json()
 }
 
-export async function listAllJobs(): Promise<Job[]> {
-  const res = await fetch('/api/admin/jobs')
-  if (!res.ok) return []
-  return res.json()
-}
-
 export async function getJob(id: string): Promise<Job> {
   const res = await fetch(`/api/jobs/${id}`)
   if (!res.ok) throw new Error('not found')

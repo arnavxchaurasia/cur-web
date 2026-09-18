@@ -185,6 +185,11 @@ def main():
                       -- mappers across this file actually use.
                       OR projection_note ILIKE '%unavailable in%'
                       OR projection_note ILIKE '%real cost may differ%'
+                      -- Preserve notes from mappers that emit their own per-operation
+                      -- pricing (e.g. PutLogEvents → Cloud Logging Log Ingestion),
+                      -- so the service_map generic "Multi-component" reason doesn't
+                      -- overwrite a more specific, accurate SKU-level note.
+                      OR projection_note ILIKE '%log ingestion%'
                     -- The mapper's own note already carries real, row-specific
                     -- evidence (e.g. the actual RAM/tier picked, or its own
                     -- verify-with-customer flag) — append the rule's note rather

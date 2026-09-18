@@ -6,18 +6,19 @@ import (
 )
 
 type Job struct {
-	ID        string    `json:"id"`
-	Owner     string    `json:"owner"`
-	Prospect  string    `json:"prospect"`
-	Status    string    `json:"status"`
-	InputExt  string    `json:"input_ext"`
-	AWSSpend  *float64  `json:"aws_spend"`
-	Error     string    `json:"error"`
-	SessionID string    `json:"session_id"`
-	AgentPID  int       `json:"agent_pid"`
-	Attempts  int       `json:"attempts"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID          string     `json:"id"`
+	Owner       string     `json:"owner"`
+	Prospect    string     `json:"prospect"`
+	Status      string     `json:"status"`
+	InputExt    string     `json:"input_ext"`
+	AWSSpend    *float64   `json:"aws_spend"`
+	Error       string     `json:"error"`
+	SessionID   string     `json:"session_id"`
+	AgentPID    int        `json:"agent_pid"`
+	Attempts    int        `json:"attempts"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	CancelledAt *time.Time `json:"cancelled_at,omitempty"`
 }
 
 func (d *DB) CreateJob(id, owner, prospect, inputExt, sessionID string) error {
@@ -163,6 +164,190 @@ func (d *DB) UpdateJobFailed(id, errMsg string) error {
 		errMsg, id,
 	)
 	return err
+}
+
+func (d *DB) UpdateJobCancelled(id string) error {
+	_, err := d.conn.Exec(
+		`UPDATE jobs SET status='cancelled', cancelled_at=datetime('now'), updated_at=datetime('now') WHERE id=?`,
+		id,
+	)
+	return err
+}
+
+// DeleteJob removes a job row. Callers must ensure the job is in a terminal
+// state (done/failed/cancelled) before calling this.
+func (d *DB) DeleteJob(id string) error {
+	_, err := d.conn.Exec(`DELETE FROM jobs WHERE id=?`, id)
+	return err
+}
+
+// ListAllJobsFiltered supports the admin jobs page: pagination plus optional
+// status/date-range filtering. Any of status/from/to may be empty/nil to skip
+// that filter.
+func (d *DB) ListAllJobsFiltered(limit, offset int, status string, from, to *time.Time) ([]*Job, error) {
+	q := `SELECT id, owner, prospect, status, input_ext, aws_spend, error, session_id, agent_pid, attempts, created_at, updated_at
+	      FROM jobs WHERE 1=1`
+	var args []any
+	if status != "" {
+		q += ` AND status = ?`
+		args = append(args, status)
+	}
+	if from != nil {
+		q += ` AND created_at >= ?`
+		args = append(args, from.UTC().Format("2006-01-02 15:04:05"))
+	}
+	if to != nil {
+		q += ` AND created_at <= ?`
+		args = append(args, to.UTC().Format("2006-01-02 15:04:05"))
+	}
+	q += ` ORDER BY created_at DESC LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
+
+	rows, err := d.conn.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var jobs []*Job
+	for rows.Next() {
+		j, err := scanJob(rows)
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, j)
+	}
+	return jobs, nil
+}
+
+func (d *DB) CountAllJobs(status string, from, to *time.Time) (int, error) {
+	q := `SELECT COUNT(*) FROM jobs WHERE 1=1`
+	var args []any
+	if status != "" {
+		q += ` AND status = ?`
+		args = append(args, status)
+	}
+	if from != nil {
+		q += ` AND created_at >= ?`
+		args = append(args, from.UTC().Format("2006-01-02 15:04:05"))
+	}
+	if to != nil {
+		q += ` AND created_at <= ?`
+		args = append(args, to.UTC().Format("2006-01-02 15:04:05"))
+	}
+	var count int
+	err := d.conn.QueryRow(q, args...).Scan(&count)
+	return count, err
+}
+
+func (d *DB) LogAdminAction(actorEmail, action, targetID, details string) error {
+	_, err := d.conn.Exec(
+		`INSERT INTO admin_audit (actor_email, action, target_id, details) VALUES (?, ?, ?, ?)`,
+		actorEmail, action, targetID, details,
+	)
+	return err
+}
+
+type AuditEntry struct {
+	ID         int64     `json:"id"`
+	ActorEmail string    `json:"actor_email"`
+	Action     string    `json:"action"`
+	TargetID   string    `json:"target_id"`
+	Details    string    `json:"details"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+func (d *DB) ListAuditLog(limit, offset int) ([]*AuditEntry, error) {
+	rows, err := d.conn.Query(
+		`SELECT id, actor_email, action, target_id, details, created_at
+		 FROM admin_audit ORDER BY created_at DESC LIMIT ? OFFSET ?`, limit, offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var entries []*AuditEntry
+	for rows.Next() {
+		var e AuditEntry
+		var targetID, details sql.NullString
+		var createdAtStr string
+		if err := rows.Scan(&e.ID, &e.ActorEmail, &e.Action, &targetID, &details, &createdAtStr); err != nil {
+			return nil, err
+		}
+		e.TargetID = targetID.String
+		e.Details = details.String
+		createdAt, err := time.Parse(time.RFC3339, createdAtStr)
+		if err != nil {
+			createdAt, err = time.Parse("2006-01-02 15:04:05", createdAtStr)
+			if err != nil {
+				return nil, err
+			}
+		}
+		e.CreatedAt = createdAt
+		entries = append(entries, &e)
+	}
+	return entries, nil
+}
+
+type UsageStats struct {
+	TotalJobs        int                `json:"total_jobs"`
+	DoneJobs         int                `json:"done_jobs"`
+	FailedJobs       int                `json:"failed_jobs"`
+	FailureRate      float64            `json:"failure_rate"`
+	AvgProcessingSec float64            `json:"avg_processing_seconds"`
+	JobsByDay        []DayCount         `json:"jobs_by_day"`
+}
+
+type DayCount struct {
+	Day   string `json:"day"`
+	Count int    `json:"count"`
+}
+
+// GetUsageStats reports jobs/day for the last 30 days, overall failure rate,
+// and average processing time for completed jobs.
+func (d *DB) GetUsageStats() (*UsageStats, error) {
+	stats := &UsageStats{}
+	if err := d.conn.QueryRow(`SELECT COUNT(*) FROM jobs`).Scan(&stats.TotalJobs); err != nil {
+		return nil, err
+	}
+	if err := d.conn.QueryRow(`SELECT COUNT(*) FROM jobs WHERE status='done'`).Scan(&stats.DoneJobs); err != nil {
+		return nil, err
+	}
+	if err := d.conn.QueryRow(`SELECT COUNT(*) FROM jobs WHERE status='failed'`).Scan(&stats.FailedJobs); err != nil {
+		return nil, err
+	}
+	if stats.TotalJobs > 0 {
+		stats.FailureRate = float64(stats.FailedJobs) / float64(stats.TotalJobs)
+	}
+
+	var avgSec sql.NullFloat64
+	err := d.conn.QueryRow(
+		`SELECT AVG((julianday(updated_at) - julianday(created_at)) * 86400.0)
+		 FROM jobs WHERE status='done'`,
+	).Scan(&avgSec)
+	if err != nil {
+		return nil, err
+	}
+	if avgSec.Valid {
+		stats.AvgProcessingSec = avgSec.Float64
+	}
+
+	rows, err := d.conn.Query(
+		`SELECT date(created_at) as day, COUNT(*) FROM jobs
+		 WHERE created_at >= datetime('now', '-30 days')
+		 GROUP BY day ORDER BY day`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var dc DayCount
+		if err := rows.Scan(&dc.Day, &dc.Count); err != nil {
+			return nil, err
+		}
+		stats.JobsByDay = append(stats.JobsByDay, dc)
+	}
+	return stats, nil
 }
 
 type scanner interface {

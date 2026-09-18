@@ -93,6 +93,423 @@ def fmt(v, prefix="$"):
     return f"{prefix}{v:,.2f}"
 
 
+_AWS_LABEL_STRIP_RE = re.compile(
+    r"^(Amazon|AWS)\s+|Global-|APS\d-|USE\d-|EU\w*-", re.IGNORECASE
+)
+
+
+def _short_aws_label(product):
+    """Short human-readable AWS component label for the 'AWS Instance' column
+    on non-instance rows (NAT Gateway, WAF, Route 53, etc.) — this column was
+    previously blank whenever `instance_type` was NULL, i.e. for every row
+    that isn't a literal EC2/RDS instance. Strips the generic 'Amazon'/'AWS'
+    product prefix and common region/version code noise so a raw product
+    string like 'Amazon Elastic Compute Cloud NatGateway' reads as 'Elastic
+    Compute Cloud NatGateway' — not exact-match to any curated label set, but
+    always something readable instead of a bare '—'."""
+    if not product:
+        return None
+    label = _AWS_LABEL_STRIP_RE.sub("", str(product)).strip(" -")
+    return label or str(product)
+
+
+# Signal phrases that only ever show up in internal engineering commentary
+# (references to our own function/file names, "mode" bookkeeping, or bug-fix
+# narration) — never in a customer-facing pricing rationale. Used to strip
+# such commentary out of projection_note text before it reaches the report,
+# regardless of what data source it came from (service_map.json "reason"
+# fields, static-mapper notes, LLM output, etc.) or how it's punctuated.
+_DEV_NOTE_SIGNAL_RE = re.compile(
+    r"\b(?:"
+    r"\w+\.py\b"                                   # a source filename, e.g. apply_static_mappings.py
+    r"|\bmap_\w+\(\)"                               # a function call, e.g. map_efs()
+    r"|mode\s*=\s*['\"]?(?:keep|review)\b"          # internal mode bookkeeping
+    r"|mode changed \w+->\w+"
+    r"|unconditionally overwrit\w*"
+    r"|clobber\w*"
+    r"|same bug class\b"
+    r"|confirmed (?:real|empirically)\b"
+    r"|silently (?:force-mapped|overwritten|switched)\b"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _strip_dev_notes(text):
+    """Drop any clause of `text` that reads as internal engineering commentary
+    rather than customer-facing rationale (see _DEV_NOTE_SIGNAL_RE). Splits on
+    sentence/clause boundaries (". ", " — ", " - ") and removes every clause
+    from the first flagged one onward, since a debug aside typically explains
+    itself in everything that follows it too."""
+    if not text or not _DEV_NOTE_SIGNAL_RE.search(text):
+        return text
+    clauses = re.split(r"(\.\s+|\s+[—-]\s+)", text)
+    kept = []
+    for i in range(0, len(clauses), 2):
+        clause = clauses[i]
+        if _DEV_NOTE_SIGNAL_RE.search(clause):
+            break
+        kept.append(clause)
+        if i + 1 < len(clauses):
+            kept.append(clauses[i + 1])
+    cleaned = "".join(kept).rstrip()
+    cleaned = re.sub(r"[\s;—-]+$", "", cleaned).strip()
+    if cleaned and not cleaned.endswith((".", ")", "]")):
+        cleaned += "."
+    return cleaned
+
+
+def _format_why_html(notes_raw):
+    """Parse a combined projection_note string into structured HTML.
+
+    Returns (why_html, cost_tier_html).
+
+    The note string is a · -separated concatenation of per-component notes
+    (one per billing component — core, RAM, OS license, GPU, etc.).  We parse
+    it into labelled rows so the customer sees a clean breakdown instead of a
+    wall of internal mapping text, and collapse any detail/caveat text behind
+    a <details> toggle so it never wraps the table cell to unreadable lengths.
+    """
+    e = _html.escape
+
+    raw = (notes_raw or "").replace(" | ", " · ")
+
+    # ── strip internal bookkeeping tokens ─────────────────────────────────────
+    raw = re.sub(r"\s*\[validator:[^\]]*\]", "", raw)
+    raw = re.sub(r"\s*\(rule=service_map_v1[^)]*\)", "", raw)
+    raw = raw.strip(" ;")
+    raw = _strip_dev_notes(raw)
+
+    # ── extract cost-tier aside ────────────────────────────────────────────────
+    cost_tier_html = ""
+    m = re.search(r"\[cost-tier:\s*([^\]]+)\]", raw)
+    if m:
+        cost_tier_html = f'<div class="cost-tier-note">{e(m.group(1).strip())}</div>'
+        raw = (raw[:m.start()] + raw[m.end():]).strip(" ;")
+
+    if not raw:
+        return "", cost_tier_html
+
+    # ── split into per-component segments ─────────────────────────────────────
+    segments = [s.strip() for s in raw.split(" · ") if s.strip()]
+
+    # ── classify each segment ─────────────────────────────────────────────────
+    # Structured buckets used to build the labelled-row display.
+    gcp_targets   = []   # primary "GCE Family X" lines
+    os_licenses   = []   # RHEL / Windows license lines
+    inline_notes  = []   # [Note: …] extracted from any segment
+    arch_caveats  = []   # [architecture review recommended: …]
+    verify_flags  = []   # [verify with customer …] / "verify with customer"
+    other_lines   = []   # free-form lines that don't fit above
+
+    _DET_MAP  = "Deterministic mapping:"
+    _DET_OS   = "Deterministic OS-license mapping:"
+    _DET_DB   = "Deterministic DB mapping:"
+    _GPU_MAP  = "GPU workload mapping:"
+    _GPU_ACCEL = "Nvidia Accelerator attachment"
+    _NOTE_RE  = re.compile(r'\[Note:\s*([^\]]+)\]', re.IGNORECASE)
+    _ARCH_RE  = re.compile(r'\[architecture review recommended:\s*([^\]]+)\]', re.IGNORECASE)
+    _VFY_RE   = re.compile(r'\[verify with customer[^\]]*\]', re.IGNORECASE)
+    _VFY2_RE  = re.compile(r'verify with customer', re.IGNORECASE)
+    # burstable / family-switch free-form: "t3a.medium → N2D AMD (2 vCPU / 4.0 GiB)"
+    _ARROW_RE = re.compile(
+        r'^([\w.\-]+)\s*[→\->]+\s*([\w\s.]+?)\s*\((\d+)\s*vCPU\s*/\s*([\d.]+)\s*GiB?\)',
+        re.IGNORECASE,
+    )
+    # no-rate suffix: " [no rate in region …]" — strip, it's an ops detail
+    _NO_RATE_RE = re.compile(r'\s*\[no rate in region[^\]]*\]', re.IGNORECASE)
+
+    for seg in segments:
+        seg = _NO_RATE_RE.sub("", seg)
+
+        # Pull bracketed sub-tokens out before classifying the remainder.
+        for m2 in _NOTE_RE.finditer(seg):
+            inline_notes.append(m2.group(1).strip())
+        for m2 in _ARCH_RE.finditer(seg):
+            arch_caveats.append(m2.group(1).strip())
+        for m2 in _VFY_RE.finditer(seg):
+            txt = m2.group(0)
+            inner = re.sub(r'^\[verify with customer[:\s]*', '', txt, flags=re.IGNORECASE).rstrip(']').strip()
+            verify_flags.append(inner or "verify workload performance with customer")
+
+        clean = _NOTE_RE.sub("", seg)
+        clean = _ARCH_RE.sub("", clean)
+        clean = _VFY_RE.sub("", clean)
+        clean = clean.strip(" ;·")
+
+        if not clean:
+            continue
+
+        if clean.startswith(_DET_OS):
+            os_licenses.append(clean[len(_DET_OS):].strip())
+
+        elif clean.startswith(_DET_DB):
+            # "Deterministic DB mapping: Cloud SQL for MySQL standard vCPU (N2D family)"
+            part = clean[len(_DET_DB):].strip()
+            gcp_targets.append(part)
+
+        elif clean.startswith(_DET_MAP):
+            part = clean[len(_DET_MAP):].strip()
+            part = re.sub(r'^GCE\s+', '', part)
+            gcp_targets.append(part)
+
+        elif clean.startswith(_GPU_MAP):
+            # "GPU workload mapping: GCE G2 Core" → "G2 (paired compute)"
+            part = clean[len(_GPU_MAP):].strip()
+            part = re.sub(r'^GCE\s+', '', part)
+            gcp_targets.append(part)
+
+        elif clean.lower().startswith(_GPU_ACCEL.lower()):
+            # "Nvidia Accelerator attachment (Nvidia L4 GPU)" → separate GPU row
+            accel = re.search(r'\(([^)]+)\)', clean)
+            label = accel.group(1) if accel else clean
+            # "[no exact GCP equivalent for A10G; substituted L4 — …]" →
+            # split into an inline note (the substitution fact) + a verify flag
+            alias = re.search(r'\[no exact GCP equivalent[^\]]*\]', clean, re.IGNORECASE)
+            if alias:
+                alias_body = alias.group(0).strip('[]')
+                # keep up to first semicolon as the note; rest is verify caveat
+                parts = alias_body.split(';', 1)
+                # Preserve original capitalisation of GPU model names (A10G, L4, etc.)
+                inline_notes.append(parts[0].strip())
+                if len(parts) > 1:
+                    tail = parts[1].strip().lstrip('- ')
+                    verify_flags.append(tail[:1].upper() + tail[1:] if tail else "")
+                clean = clean[:alias.start()].strip()
+                accel2 = re.search(r'\(([^)]+)\)', clean)
+                label = accel2.group(1) if accel2 else label
+            gcp_targets.append(f"\x00gpu\x00{label}")  # sentinel for GPU accelerator row
+
+        elif _ARROW_RE.match(clean):
+            # burstable / family-switch: "t3a.medium → N2D AMD (2 vCPU / 4.0 GiB)"
+            am = _ARROW_RE.match(clean)
+            src, fam, vcpu, ram = am.group(1), am.group(2).strip(), am.group(3), am.group(4)
+            gcp_targets.append(fam)
+            inline_notes.append(f"Source: {src} · {vcpu} vCPU / {ram} GiB")
+
+        elif re.match(r'^S3 .+\s*[→\->]+\s*GCS .+ Class [AB] Operations', clean, re.IGNORECASE):
+            # "S3 Glacier Instant Retrieval GET → GCS Coldline Class B Operations ($0.05/10k; note)"
+            # Extract GCS target and parenthetical rate/note so they render as structured rows.
+            m3 = re.match(
+                r'^S3 .+\s*[→\->]+\s*GCS\s+(.+?)\s*\(([^)]+)\)\s*(.*)$',
+                clean, re.IGNORECASE,
+            )
+            if m3:
+                gcp_targets.append(m3.group(1).strip())
+                rate_note = m3.group(2).strip()
+                # split on semicolon: first part = rate claim, second = pricing caveat
+                halves = rate_note.split(";", 1)
+                inline_notes.append(halves[0].strip())
+                if len(halves) > 1:
+                    caveat = halves[1].strip()
+                    # "GCS is 2× cheaper …" is a real pricing delta — surface it as a verify flag
+                    verify_flags.append(caveat[:1].upper() + caveat[1:] if caveat else "")
+                if m3.group(3).strip():
+                    inline_notes.append(m3.group(3).strip())
+            else:
+                other_lines.append(clean)
+
+        elif clean.startswith("Local SSD"):
+            gcp_targets.append("Local SSD (storage-optimized attachment)")
+
+        elif clean.startswith("[Networking]") or clean.startswith("["):
+            # service_map.json reason note — strip the category tag
+            body = re.sub(r'^\[[^\]]+\]\s*', '', clean)
+            # strip ". NOTE: mode changed …" bookkeeping tail
+            body = re.sub(r'\.\s*NOTE:\s*mode changed.*$', '', body, flags=re.IGNORECASE).strip()
+            other_lines.append(body)
+
+        else:
+            # Plain free-form note — check for verify-with-customer inline
+            if _VFY2_RE.search(clean):
+                # split at the verify phrase so the main line stays clean
+                parts = _VFY2_RE.split(clean, maxsplit=1)
+                if parts[0].strip():
+                    other_lines.append(parts[0].strip(" ;—"))
+                # the phrase itself was already harvested above if in brackets;
+                # if it's bare text, add a generic flag
+                if not any("verify" in f.lower() for f in verify_flags):
+                    verify_flags.append("verify workload performance with customer")
+            else:
+                other_lines.append(clean)
+
+    # ── deduplicate while preserving order ────────────────────────────────────
+    def _dedup(lst):
+        seen, out = set(), []
+        for x in lst:
+            if x not in seen:
+                seen.add(x); out.append(x)
+        return out
+
+    gcp_targets  = _dedup(gcp_targets)
+    os_licenses  = _dedup(os_licenses)
+    inline_notes = _dedup(inline_notes)
+    arch_caveats = _dedup(arch_caveats)
+    verify_flags = _dedup(verify_flags)
+    other_lines  = _dedup(other_lines)
+
+    # ── collapse redundant component pairs into one label ────────────────────
+    # "N2D AMD Core" + "N2D AMD RAM"  →  "N2D AMD"
+    # "Cloud SQL for MySQL standard vCPU" + "…standard RAM"  →  "Cloud SQL for MySQL standard"
+    # Normalise a target string to its "family" by stripping trailing component
+    # suffixes, including parenthetical qualifiers like "(N2D AMD family)".
+    # "N2D AMD Core"                               → "N2D AMD"
+    # "Cloud SQL for MySQL standard vCPU (N2D ...)" → "Cloud SQL for MySQL standard"
+    _COMP_PAT = re.compile(
+        r'\s*(Core|RAM|vCPU|ram|core)\s*(?:\([^)]*\))?\s*$', re.IGNORECASE)
+    def _strip_comp(t):
+        return _COMP_PAT.sub('', t).strip()
+
+    plain_targets = [t for t in gcp_targets if not t.startswith('\x00gpu\x00')]
+    gpu_targets   = [t[5:] for t in gcp_targets if t.startswith('\x00gpu\x00')]
+
+    _IS_CORE = re.compile(r'\s+(Core|vCPU|core)\b', re.IGNORECASE)
+    _IS_RAM  = re.compile(r'\s+(RAM|ram)\b', re.IGNORECASE)
+    cores = {_strip_comp(t) for t in plain_targets if _IS_CORE.search(t)}
+    rams  = {_strip_comp(t) for t in plain_targets if _IS_RAM.search(t)}
+    families = cores & rams
+
+    collapsed = []
+    for fam in sorted(families):
+        collapsed.append(fam)
+    for t in plain_targets:
+        base = _strip_comp(t)
+        if base not in families:
+            # Still strip the suffix even when unpaired — "T2A Arm Core" → "T2A Arm"
+            collapsed.append(base if _COMP_PAT.search(t) else t)
+    gcp_targets = _dedup(collapsed) + [f"\x00gpu\x00{g}" for g in _dedup(gpu_targets)]
+
+    # ── pretty-print helpers ───────────────────────────────────────────────────
+    def row(key, val_html, cls="why-row-val"):
+        return (f'<div class="why-row">'
+                f'<span class="why-row-key">{e(key)}</span>'
+                f'<span class="{cls}">{val_html}</span>'
+                f'</div>')
+
+    def chip(label, cls):
+        return f'<span class="why-chip {cls}">{e(label)}</span>'
+
+    # ── build primary (always-visible) rows ───────────────────────────────────
+    primary_rows = []
+
+    if gcp_targets:
+        # Annotate family names with a short descriptor chip when recognisable.
+        _FAMILY_CHIPS = {
+            "C2D AMD": ("Compute-opt · AMD EPYC", "chip-new-gen"),
+            "C3D":     ("Compute-opt · AMD Genoa", "chip-new-gen"),
+            "C3":      ("Compute-opt · Intel", "chip-new-gen"),
+            "C4":      ("Compute-opt · Intel", "chip-new-gen"),
+            "C4D":     ("Compute-opt · AMD", "chip-new-gen"),
+            "C4A Arm": ("Compute-opt · ARM", "chip-new-gen"),
+            "N2D AMD": ("General · AMD EPYC", "chip-new-gen"),
+            "N4":      ("General · Intel", "chip-new-gen"),
+            "N4D":     ("General · AMD Genoa", "chip-new-gen"),
+            "T2A Arm": ("General · ARM", "chip-new-gen"),
+            "G2":      ("Paired compute · L4", "chip-arch"),
+            "A2":      ("Paired compute · A100", "chip-arch"),
+            "A3":      ("Paired compute · H100", "chip-arch"),
+            # GCS operation SKUs — matched on prefix so "Coldline Class B Operations" hits first
+            "Archive Class B Operations":  ("Cold storage · 365-day min", "chip-arch"),
+            "Coldline Class B Operations": ("Cold storage · 90-day min",  "chip-arch"),
+            "Standard Class B Operations": ("Object storage reads",        "chip-new-gen"),
+            "Standard Class A Operations": ("Object storage writes",       "chip-new-gen"),
+        }
+        has_gpu_row = any(t.startswith('\x00gpu\x00') for t in gcp_targets)
+        for fam in gcp_targets:
+            if fam.startswith('\x00gpu\x00'):
+                gpu_label = fam[5:]
+                primary_rows.append(row("GPU accelerator", e(gpu_label)))
+                continue
+            label = fam
+            ch = ""
+            # Only show machine-family chip when there is no separate GPU row
+            # (to avoid redundant "GPU · L4" on the G2 row + the GPU row).
+            if not has_gpu_row:
+                for key, (desc, cls_) in _FAMILY_CHIPS.items():
+                    if label.startswith(key):
+                        ch = chip(desc, cls_)
+                        break
+            else:
+                # With a GPU row, just add a plain "Compute" chip for the paired family
+                for key in _FAMILY_CHIPS:
+                    if label.startswith(key):
+                        ch = chip("Paired compute", "chip-new-gen")
+                        break
+            primary_rows.append(row("GCP target", e(label) + ch))
+
+    if os_licenses:
+        for lic in os_licenses:
+            # Make RHEL band human-readable: "Red Hat Enterprise Linux 9 on VM with up to 8 VCPU"
+            # → "RHEL 9 · up to 8 vCPU tier"
+            display = lic
+            rhel_m = re.match(
+                r'Red Hat Enterprise Linux (\d+) on VM with (.+)', lic, re.IGNORECASE)
+            if rhel_m:
+                band = rhel_m.group(2).replace("VCPU", "vCPU").replace("vcpu", "vCPU")
+                display = f"RHEL {rhel_m.group(1)} — {band}"
+            win_m = re.match(r'Windows Server.*?(\d{4}).*?(Core|BYOL|per vCPU.*)?$', lic, re.IGNORECASE)
+            if win_m:
+                display = f"Windows Server {win_m.group(1)} license"
+                if win_m.group(2):
+                    display += f" ({win_m.group(2)})"
+            primary_rows.append(row("OS license", e(display)))
+
+    for line in other_lines:
+        primary_rows.append(row("Note", e(line)))
+
+    # ── build detail (collapsible) rows ───────────────────────────────────────
+    detail_rows = []
+
+    if inline_notes:
+        for note in inline_notes:
+            detail_rows.append(row("Detail", e(note)))
+
+    if arch_caveats:
+        for cav in arch_caveats:
+            detail_rows.append(row("⚠ Architecture", e(cav), cls="why-row-caveat"))
+
+    if verify_flags:
+        for flag in verify_flags:
+            detail_rows.append(row("☑ Verify", e(flag), cls="why-row-caveat"))
+
+    # ── assemble HTML ─────────────────────────────────────────────────────────
+    if not primary_rows and not detail_rows:
+        # Fallback: render as plain text (unusual / passthrough rows).
+        fallback = e(raw[:320] + ("…" if len(raw) > 320 else ""))
+        return (
+            f'<div class="why-block">'
+            f'<span class="why-label">Why this equivalent:</span>'
+            f'<span class="why-text">{fallback}</span>'
+            f'</div>',
+            cost_tier_html,
+        )
+
+    rows_html = '<div class="why-rows">' + "".join(primary_rows) + '</div>'
+
+    if detail_rows:
+        detail_html = '<div class="why-detail-rows">' + "".join(detail_rows) + '</div>'
+        expand_html = (
+            '<details class="why-expand">'
+            '<summary>'
+            '<span class="why-toggle">'
+            '<span class="why-toggle-arrow">▶</span> details</span>'
+            '</summary>'
+            + detail_html +
+            '</details>'
+        )
+    else:
+        expand_html = ""
+
+    html = (
+        f'<div class="why-block">'
+        f'<span class="why-label">Why this equivalent:</span>'
+        + rows_html
+        + expand_html
+        + f'</div>'
+    )
+    return html, cost_tier_html
+
+
 CSS = """
 <style>
   *, *::before, *::after { box-sizing: border-box; }
@@ -117,6 +534,13 @@ CSS = """
   }
   h3 { font-size: 13px; font-weight: 600; margin: 16px 0 6px; color: #202124; }
   .table-scroll { overflow-x: auto; }
+  .extra-col { display: none; }
+  table.show-extra .extra-col { display: table-cell; }
+  .extra-toggle {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; color: #5F6368; cursor: pointer; margin: 4px 0 10px;
+  }
+  .extra-toggle input { cursor: pointer; }
   table { border-collapse: collapse; width: 100%; }
   th {
     background: #1A73E8; color: #fff;
@@ -132,6 +556,15 @@ CSS = """
   .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .green { color: #0D9D58; }
   .red   { color: #D93025; }
+  .row-passthrough { background: #f8f9fa; }
+  .row-passthrough td { color: #9aa0a6 !important; }
+  .row-passthrough .num.green, .row-passthrough .num.red { color: #9aa0a6 !important; }
+  .row-passthrough a { color: #9aa0a6 !important; }
+  .row-free { background: #e8f0fe; }
+  .row-free td { color: #1967D2 !important; }
+  .row-free .num.green, .row-free .num.red { color: #1967D2 !important; }
+  .row-free a { color: #1967D2 !important; }
+  .free-tier { font-style: italic; }
   .summary-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
@@ -158,18 +591,28 @@ CSS = """
   .info-box li, .warn-box li { margin-bottom: 3px; }
   .desc { font-size: 11px; color: #5F6368; line-height: 1.45; max-width: 380px; }
   .why-block { margin-top: 4px; padding-left: 8px; border-left: 2px solid #E8EAED; }
-  .why-label { font-size: 10px; font-weight: 600; color: #1A73E8; letter-spacing: 0.2px; }
+  .why-label { font-size: 10px; font-weight: 600; color: #1A73E8; letter-spacing: 0.2px; display: block; margin-bottom: 3px; }
   .why-text  { font-size: 11px; color: #5F6368; line-height: 1.45; }
-  .why-expand summary { cursor: pointer; list-style: none; }
+  .why-rows  { display: flex; flex-direction: column; gap: 3px; margin-top: 2px; }
+  .why-row   { display: flex; gap: 6px; align-items: baseline; font-size: 11px; line-height: 1.4; }
+  .why-row-key   { font-size: 10px; font-weight: 600; color: #80868B; white-space: nowrap; min-width: 80px; text-transform: uppercase; letter-spacing: 0.3px; }
+  .why-row-val   { color: #202124; }
+  .why-row-caveat { color: #B06000; }
+  .why-row-warn   { color: #C5221F; }
+  .why-chip { display: inline-block; font-size: 9px; font-weight: 600; padding: 1px 6px; border-radius: 100px; margin-left: 4px; vertical-align: middle; }
+  .chip-arch  { background: #FFF3E0; color: #E65100; }
+  .chip-verify { background: #FFF8E1; color: #B06000; }
+  .chip-new-gen { background: #E8F5E9; color: #1B5E20; }
+  .why-expand { margin-top: 3px; }
+  .why-expand summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 4px; }
   .why-expand summary::-webkit-details-marker { display: none; }
-  .why-more { font-size: 10px; color: #1A73E8; margin-left: 4px; white-space: nowrap; }
-  .why-more-closed { display: inline; }
-  .why-more-open   { display: none; }
-  .why-expand[open] .why-more-closed { display: none; }
-  .why-expand[open] .why-more-open   { display: inline; }
-  .why-text-full { display: block; margin-top: 4px; }
-  .cost-tier-note { font-size: 9px; font-weight: 300; color: #9AA0A6; font-style: italic; }
+  .why-toggle { font-size: 10px; color: #1A73E8; font-weight: 500; user-select: none; }
+  .why-toggle-arrow { font-size: 9px; display: inline-block; transition: transform 0.15s; }
+  .why-expand[open] .why-toggle-arrow { transform: rotate(90deg); }
+  .why-detail-rows { margin-top: 4px; padding-top: 4px; border-top: 1px dashed #E8EAED; display: flex; flex-direction: column; gap: 3px; }
+  .cost-tier-note { font-size: 9px; font-weight: 300; color: #9AA0A6; font-style: italic; margin-top: 2px; }
   .strat-pt { font-size: 10px; color: #80868B; margin-left: 4px; }
+  .cud-na-marker { font-size: 10px; color: #EA8600; cursor: help; margin-left: 1px; }
   .legend { font-style: italic; color: #5F6368; font-size: 12px; margin-top: 8px; }
   .section-meta { font-size: 11px; color: #80868B; margin: -6px 0 10px; }
   ul.method { margin: 6px 0; padding-left: 20px; font-size: 13px; line-height: 1.8; }
@@ -234,15 +677,28 @@ def main():
         log.warning(f"Coverage report failed: {e}")
 
     # ── totals ────────────────────────────────────────────────────────────────
-    # commitment_discount rows (RIFee/SavingsPlanRecurringFee/EdpDiscount) are
-    # excluded from both sides: apply_commitment_ignores.py's own rationale is
-    # that their cost is "already reflected in effective rates" of the covered
-    # DiscountedUsage rows, i.e. amortized. Summing them AND the amortized usage
-    # rows they fund double-counts the same dollars on the AWS side — while the
-    # GCP side already excludes them (strategy='ignore' -> $0). Excluding them
-    # here keeps both totals counting the same underlying spend exactly once.
-    aws_workload     = conn.execute("SELECT COALESCE(SUM(aws_amortized_cost),0) FROM aws_li_catalog WHERE is_workload AND mechanic_group IS DISTINCT FROM 'commitment_discount'").fetchone()[0]
-    aws_non_workload = conn.execute("SELECT COALESCE(SUM(aws_amortized_cost),0) FROM aws_li_catalog WHERE NOT is_workload AND mechanic_group IS DISTINCT FROM 'commitment_discount'").fetchone()[0]
+    # aws_grand MUST equal the real invoice total — verified directly against a
+    # real PDF bill: SUM(aws_amortized_cost) over every ingested row, no filter
+    # at all, reproduced the bill's own stated Grand Total to the cent.
+    #
+    # commitment_discount rows (RIFee/SavingsPlanRecurringFee/EdpDiscount) used
+    # to be excluded here on the theory that their cost is "already reflected
+    # in effective rates" of the DiscountedUsage rows they fund, i.e. summing
+    # both double-counts the same dollars. That reasoning assumes AWS's own
+    # amortized-cost redistribution already folded the fee into the usage
+    # rows' rates. Confirmed real bug: it does NOT hold for PDF-ingested bills
+    # — ingest.py explicitly SKIPS the paired "<instance> usage covered by
+    # Compute Savings Plans (USD Y)" negative-offset lines (see ingest.py's
+    # "Skip Savings-Plan/RI 'covered by' lines" comment), so the usage rows
+    # here carry the full GROSS on-demand rate, not a discount-inclusive rate
+    # — nothing else in the ingested data accounts for the Savings Plan's real
+    # dollar cost. Excluding the fee row on top of that silently dropped real
+    # spend from the headline total (confirmed live: a bill's true $15,721.87
+    # total under-reported as $10,663.15 — off by exactly the $5,058.72
+    # Savings Plan recurring fee). Trusting the verified ground truth (sum of
+    # every row) instead of a format-dependent heuristic.
+    aws_workload     = conn.execute("SELECT COALESCE(SUM(aws_amortized_cost),0) FROM aws_li_catalog WHERE is_workload").fetchone()[0]
+    aws_non_workload = conn.execute("SELECT COALESCE(SUM(aws_amortized_cost),0) FROM aws_li_catalog WHERE NOT is_workload").fetchone()[0]
     aws_grand = aws_workload + aws_non_workload
 
     # Gross bill before any credit/discount/EDP-reconciliation row nets
@@ -254,8 +710,7 @@ def main():
     # reader can see both "what you're billed" and "what was discounted off"
     # without doing the subtraction themselves.
     aws_gross = conn.execute(
-        "SELECT COALESCE(SUM(aws_amortized_cost),0) FROM aws_li_catalog "
-        "WHERE aws_amortized_cost > 0 AND mechanic_group IS DISTINCT FROM 'commitment_discount'"
+        "SELECT COALESCE(SUM(aws_amortized_cost),0) FROM aws_li_catalog WHERE aws_amortized_cost > 0"
     ).fetchone()[0]
     aws_discounts = aws_gross - aws_grand
 
@@ -430,12 +885,14 @@ def main():
             c.aws_region,
             c.gcp_region,
             c.is_workload,
-            c.pricing_model
+            c.pricing_model,
+            c.instance_type,
+            ANY_VALUE(m.gcp_sku_name)                                          AS gcp_sku_name
         FROM aws_li_catalog c
         LEFT JOIN aws_li_to_gcp_li m ON c.aws_li_key = m.aws_li_key
         LEFT JOIN gcp_projection    p ON c.aws_li_key = p.aws_li_key
                                       AND p.component IS NOT DISTINCT FROM m.component
-        GROUP BY c.aws_li_key, c.product, c.operation, c.aws_amortized_cost, c.aws_region, c.gcp_region, c.is_workload, c.pricing_model
+        GROUP BY c.aws_li_key, c.product, c.operation, c.aws_amortized_cost, c.aws_region, c.gcp_region, c.is_workload, c.pricing_model, c.instance_type
         ORDER BY c.aws_amortized_cost DESC
     """).fetchall()
 
@@ -577,6 +1034,13 @@ def main():
     # ── wins/losses table HTML ────────────────────────────────────────────────
     def wins_table(data, header_label, color):
         if not data:
+            if passthrough_spend > 0:
+                return (
+                    f"<p style='color:#80868B;font-size:12px'>No significant {header_label.lower()} found "
+                    f"among rows with a resolved GCP price. {fmt(passthrough_spend)} of workload spend "
+                    f"({passthrough_pct:.1f}% of the bill) is still passthrough (carried at AWS cost, no "
+                    f"GCP-specific price resolved yet) and isn't reflected in this comparison.</p>"
+                )
             return f"<p style='color:#80868B;font-size:12px'>No significant {header_label.lower()} found.</p>"
         rows_html = ""
         for product, gcp_service, aws, gcp, diff in data:
@@ -610,7 +1074,7 @@ def main():
     detail_rows_html = ""
     idx = 1
     for r in rows:
-        product, operation, gcp_svc, strategy, notes, aws, od, cud1, cud3, aws_region, gcp_region, is_wl, pricing_model = r
+        product, operation, gcp_svc, strategy, notes, aws, od, cud1, cud3, aws_region, gcp_region, is_wl, pricing_model, instance_type, gcp_sku_name = r
         ptype  = pill_type(gcp_svc, product)
         p_html = pill_html(ptype)
 
@@ -624,22 +1088,29 @@ def main():
         cud1 = cud1 or 0.0
         cud3 = cud3 or 0.0
 
+        # The report's GRAND TOTAL / summary CUD columns fall back to the
+        # On-Demand cost for any row with no CUD-specific rate (a row still
+        # bills at OD under a CUD commitment even when that particular SKU
+        # itself carries no discount — e.g. no CUD SKU exists yet, or the
+        # row is Spot/Preemptible, which CUDs don't apply to). The per-row
+        # cells below must show that same OD-fallback value (flagged with a
+        # marker) rather than a bare "—", or the totals won't foot to what a
+        # reader can add up from the visible rows.
         is_spot = (pricing_model or "").lower() == "spot"
-        if is_spot:
-            cud1_str = '—'
-            cud3_str = '—'
-            cud1_td_extra = ' title="Spot/Preemptible — CUDs not applicable on GCP"'
-            cud3_td_extra = ' title="Spot/Preemptible — CUDs not applicable on GCP"'
-        elif not has_cud1:
-            cud1_str = '—'
-            cud3_str = '—'
-            cud1_td_extra = ' title="No Committed Use Discount rate available for this SKU"'
-            cud3_td_extra = ' title="No Committed Use Discount rate available for this SKU"'
-        else:
-            cud1_str = fmt(cud1)
-            cud3_str = fmt(cud3) if has_cud3 else '—'
-            cud1_td_extra = ''
-            cud3_td_extra = '' if has_cud3 else ' title="No Committed Use Discount rate available for this SKU"'
+        spot_title = "Spot/Preemptible — CUDs not applicable; billed at Spot rate regardless of commitment"
+        no_cud_title = "No Committed Use Discount rate available for this SKU — billed at On-Demand rate under a CUD commitment"
+        marker = '<span class="cud-na-marker" title="{}">&dagger;</span>'
+
+        def _cud_cell(has_cud, cud_val):
+            if has_cud:
+                return fmt(cud_val), ''
+            title = spot_title if is_spot else no_cud_title
+            if has_od:
+                return fmt(od) + marker.format(_html.escape(title)), ''
+            return '—', f' title="{_html.escape(title)}"'
+
+        cud1_str, cud1_td_extra = _cud_cell(has_cud1 and not is_spot, cud1)
+        cud3_str, cud3_td_extra = _cud_cell(has_cud3 and not is_spot, cud3)
 
         strategy_badge = ""
         is_pt = (strategy == "passthrough")
@@ -649,71 +1120,49 @@ def main():
         elif is_ignore:
             strategy_badge = '<span class="strat-pt">[no GCP charge]</span>'
 
-        # Pull out any "[cost-tier: ...]" aside before truncating/escaping the
-        # main note — it's rendered separately, in a lighter/smaller style, so
-        # a same-tier cost swap (e.g. burstable AWS -> cheaper sustained GCP
-        # family) reads as a quiet aside rather than part of the main
-        # technical mapping description.
-        note_text = (notes or "").replace(" | ", " · ")
-        cost_tier_html = ""
-        m = re.search(r"\[cost-tier:\s*([^\]]+)\]", note_text)
-        if m:
-            cost_tier_html = f'<div class="cost-tier-note">{_html.escape(m.group(1).strip())}</div>'
-            note_text = (note_text[:m.start()] + note_text[m.end():]).strip(" ;")
-
-        # Strip internal validator/rule-engine bookkeeping — e.g.
-        # "[validator: echo bug — gcp_service was AWS name, reset to
-        # passthrough]" or "(rule=service_map_v1, gcp=Cloud NAT)". These are
-        # implementation detail (which internal rule/gate fired), not a
-        # customer-meaningful reason for the mapping choice, and cluttered
-        # the "why" text with engineering jargon. Genuinely useful caveats
-        # (e.g. "[architecture review recommended: ...]") are left in place —
-        # only the two known internal-bookkeeping patterns are removed.
-        note_text = re.sub(r"\s*\[validator:[^\]]*\]", "", note_text)
-        note_text = re.sub(r"\s*\(rule=service_map_v1[^)]*\)", "", note_text)
-        note_text = note_text.strip(" ;")
-
-        # Truncate long notes at a sentence/clause boundary where possible —
-        # a hard character cut routinely sliced the actual reasoning off
-        # mid-word (e.g. "...CUR does not reveal HA intent beyond Multi-AZ
-        # flag, storage latency requirements, connection lim…"), which
-        # defeats the point of explaining "why" at all. Prefer the last
-        # ';' or '.' before the limit; only fall back to a hard cut if
-        # neither appears in a reasonable position.
-        _TRUNC_LIMIT = 320
-        if len(note_text) > _TRUNC_LIMIT:
-            window = note_text[:_TRUNC_LIMIT]
-            cut = max(window.rfind(". "), window.rfind("; "))
-            note_text = (window[:cut + 1] if cut > _TRUNC_LIMIT * 0.4 else window) + "…"
-
         op_str = _html.escape(str(operation or ""))
-        note_str = _html.escape(note_text)
-
         region_str = _html.escape(str(gcp_region or aws_region or "—"))
 
-        # "What AWS charged for" (the raw billing line) and "why we chose
-        # this GCP equivalent" (the mapping reasoning) are visually distinct
-        # blocks — previously concatenated with a plain <br>, which read as
-        # one undifferentiated wall of text and buried the actual reasoning
-        # a customer/reviewer most wants to see.
+        why_html, cost_tier_html = _format_why_html(notes)
+
         desc_html = f'<div class="desc">'
         if op_str:
             desc_html += op_str
         desc_html += '</div>'
-        if note_str:
-            desc_html += (
-                '<div class="why-block">'
-                '<span class="why-label">Why this equivalent:</span> '
-                f'<span class="why-text">{note_str}</span>'
-                '</div>'
-            )
+        desc_html += why_html
         desc_html += cost_tier_html
 
-        # Passthrough/ignore rows, and rows where no GCP rate was resolved
-        # (strategy="map" but SKU lookup failed → gcp_projected_cost NULL):
-        # GCP columns show "—" so the reader isn't misled into thinking GCP
-        # charges the AWS amount when no real GCP equivalent was found.
-        if is_pt or is_ignore or not has_od:
+        # Rows where no GCP rate was resolved at all (strategy="map" but SKU
+        # lookup failed → gcp_projected_cost NULL): GCP columns show "—" so
+        # the reader isn't misled into thinking GCP charges the AWS amount
+        # when no real GCP equivalent was found (an unknown, not a known $0).
+        #
+        # strategy="ignore" rows are different: that IS a known, real $0 GCP
+        # cost (e.g. Cloud CDN genuinely has no per-request fee), not an
+        # unresolved unknown — show the actual $0.00 and the full AWS amount
+        # as savings, same as any other priced row, instead of hiding it
+        # behind "—" as if the cost were unknown.
+        #
+        # strategy="passthrough" rows are ALSO a known, real value, not an
+        # unknown — projection_view.py's SQL already sets their `od` to
+        # aws_amortized_cost (cost parity: "no reliable GCP-specific price,
+        # bill it at AWS's own rate" — e.g. Route 53 → Cloud DNS, ALB
+        # LCU-hours, Inter-AZ transfer, all explicitly "passthrough at cost
+        # parity" per their own projection_note). Confirmed real, high-impact
+        # display bug this fixes: `is_pt or` here forced EVERY passthrough
+        # row to show a bare "—" regardless of whether has_od was already
+        # True — throwing away a real, correctly-computed cost-parity number
+        # and making every such row look unpriced/unmapped, when the pricing
+        # was actually already correct all along. `not has_od` alone (still
+        # checked below) already covers the genuine "no rate resolved" case
+        # for both map and passthrough strategies — no separate is_pt branch
+        # was ever needed.
+        if is_ignore:
+            od_str   = fmt(0.0)
+            cud1_str = fmt(0.0)
+            cud3_str = fmt(0.0)
+            diff_td  = f'<td class="num green">+{fmt(aws)}</td>' if aws > 0.005 else '<td class="num">—</td>'
+        elif not has_od:
             od_str   = '—'
             cud1_str = '—'
             cud3_str = '—'
@@ -728,8 +1177,42 @@ def main():
             else:
                 diff_td = f'<td class="num red">−{fmt(abs(diff))}</td>'
 
+        # Falls back to a cleaned-up product name for non-instance rows (NAT
+        # Gateway, WAF, Route 53, ...) instead of a bare "—" — every row gets
+        # a short readable label here, not just literal EC2/RDS instances.
+        aws_instance_str = _html.escape(str(instance_type or _short_aws_label(product) or "—"))
+        # Genuine $0-on-GCP rows (strategy=ignore) show the SPECIFIC GCP-side
+        # reason (e.g. "Cloud CDN bills data transfer only, no per-request
+        # fee") pulled from the row's own projection_note, not a generic
+        # "Free on GCP" — the actual mapper already worked out exactly why
+        # GCP charges nothing here, so surface that instead of throwing it away.
+        if is_ignore:
+            # Two-line layout matching the reference report format: the
+            # actual GCP service/SKU that's free on the first line, "(Free
+            # tier)" annotation on the second — not a single bare "Free on
+            # GCP" string, which threw away which GCP product this even is.
+            # gcp_sku_name is usually None for ignore-strategy rows (no
+            # billable SKU exists at all, e.g. Cloud Monitoring alerting),
+            # so fall back to gcp_svc (the GCP service name, always present)
+            # instead of leaving the first line blank.
+            top_line = gcp_sku_name or gcp_svc or "Free on GCP"
+            gcp_mapping_str = (
+                f'{_html.escape(str(top_line))}<br>'
+                f'<span class="free-tier">(Free tier)</span>'
+            )
+        elif gcp_sku_name:
+            gcp_mapping_str = _html.escape(str(gcp_sku_name))
+        elif is_pt:
+            # No GCP SKU was ever resolved for this row — say so plainly
+            # instead of a bare "—", which reads as missing data rather than
+            # "this genuinely has no GCP mapping yet."
+            gcp_mapping_str = "Passthrough"
+        else:
+            gcp_mapping_str = "—"
+        row_class = ' class="row-passthrough"' if is_pt else (' class="row-free"' if is_ignore else "")
+
         detail_rows_html += (
-            f"<tr>"
+            f"<tr{row_class}>"
             f"<td style='color:#80868B;font-size:11px'>{idx}</td>"
             f"<td style='white-space:nowrap'>"
             f"  {p_html}"
@@ -737,13 +1220,15 @@ def main():
             f"  {strategy_badge}<br>"
             f"  <span style='font-size:11px;color:#1A73E8'>{_html.escape(str(gcp_svc or 'N/A'))}</span>"
             f"</td>"
-            f"<td>{desc_html}</td>"
+            f"<td style='font-size:11px;min-width:180px;max-width:260px;white-space:normal;word-break:break-word'>{aws_instance_str}</td>"
+            f"<td style='font-size:11px;color:#5F6368;min-width:220px;max-width:320px;white-space:normal;word-break:break-word'>{gcp_mapping_str}</td>"
             f"<td style='font-size:11px;color:#5F6368;white-space:nowrap'>{region_str}</td>"
             f'<td class="num">{fmt(aws)}</td>'
             f'<td class="num">{od_str}</td>'
-            f'<td class="num"{cud1_td_extra}>{cud1_str}</td>'
-            f'<td class="num"{cud3_td_extra}>{cud3_str}</td>'
+            f'<td class="num extra-col"{cud1_td_extra}>{cud1_str}</td>'
+            f'<td class="num extra-col"{cud3_td_extra}>{cud3_str}</td>'
             f"{diff_td}"
+            f'<td class="extra-col">{desc_html}</td>'
             f"</tr>\n"
         )
         idx += 1
@@ -756,12 +1241,13 @@ def main():
 
     detail_rows_html += (
         f'<tr class="total-row">'
-        f'<td colspan="4" style="font-weight:600">GRAND TOTAL</td>'
+        f'<td colspan="5" style="font-weight:600">GRAND TOTAL</td>'
         f'<td class="num">{fmt(aws_grand)}</td>'
         f'<td class="num">{fmt(gcp_grand_od)}</td>'
-        f'<td class="num">{fmt(gcp_grand_1yr)}</td>'
-        f'<td class="num">{fmt(gcp_grand_3yr)}</td>'
+        f'<td class="num extra-col">{fmt(gcp_grand_1yr)}</td>'
+        f'<td class="num extra-col">{fmt(gcp_grand_3yr)}</td>'
         f'<td class="num {diff_tot_class}" style="font-weight:600">{diff_tot_str}</td>'
+        f'<td class="extra-col"></td>'
         f'</tr>'
     )
 
@@ -818,7 +1304,37 @@ def main():
     wins_html  = wins_table(gcp_wins,  "GCP Savings", "#0D9D58")
     loses_html = wins_table(gcp_loses, "Extra Cost on GCP", "#D93025")
 
-    under_proj_html = ""  # under-projection details logged only, not shown in report
+    # Surface the already-computed under_proj_rows (GCP < 10% of AWS on mapped,
+    # material-spend rows) instead of discarding them — a customer-facing flag
+    # that a mapping may need review is more useful than logging it only where
+    # nobody but an engineer will ever see it.
+    if under_proj_rows:
+        _up_rows_html = ""
+        for product, gcp_service, gcp_sku, aws, gcp, notes in under_proj_rows:
+            pct = (gcp / aws * 100) if aws else 0
+            _up_rows_html += (
+                f"<tr>"
+                f"<td>{_html.escape(str(product or ''))}</td>"
+                f"<td style='color:#5F6368;font-size:12px'>{_html.escape(str(gcp_service or ''))} "
+                f"{_html.escape(str(gcp_sku or ''))}</td>"
+                f"<td class='num'>{fmt(aws)}</td>"
+                f"<td class='num'>{fmt(gcp)}</td>"
+                f"<td class='num' style='color:#D93025;font-weight:600'>{pct:.1f}%</td>"
+                f"</tr>"
+            )
+        under_proj_html = (
+            '<h3 style="color:#F9AB00">&#9888; Flagged for Review</h3>'
+            '<p class="section-meta">Mapped rows where the GCP estimate is under 10% of the AWS cost on '
+            '&gt;$50/mo AWS spend — GCP may genuinely be far cheaper here, but this ratio also matches the '
+            'signature of a wrong SKU, a missing billing component, or a unit mismatch. Worth a manual check '
+            'before relying on these rows.</p>'
+            '<table><tr><th>AWS Service</th><th>GCP Target</th>'
+            "<th class='num'>AWS Cost</th><th class='num'>GCP Cost</th>"
+            "<th class='num'>GCP as % of AWS</th></tr>"
+            f"{_up_rows_html}</table>"
+        )
+    else:
+        under_proj_html = ""
 
     # One plain-language line instead of a table + a paragraph explaining a
     # 0.5% tolerance — a reader just needs to know "does GCP give me at least
@@ -891,42 +1407,6 @@ def main():
 {cards_html}
 </div>
 
-<h2>Cost Summary</h2>
-<div class="table-scroll"><table>
-  <tr>
-    <th>Cost Category</th>
-    <th class="num">AWS Cost</th>
-    <th class="num">Mapped AWS Cost</th>
-    <th class="num">GCP On-Demand</th>
-    <th class="num">GCP 1-Year CUD</th>
-    <th class="num">GCP 3-Year CUD</th>
-  </tr>
-  <tr>
-    <td>Workload (migrated to GCP)</td>
-    <td class="num">{fmt(aws_workload)}</td>
-    <td class="num">{fmt(aws_mapped_cost)}</td>
-    <td class="num">{fmt(gcp_od)}</td>
-    <td class="num">{fmt(gcp_1yr)}</td>
-    <td class="num">{fmt(gcp_3yr)}</td>
-  </tr>
-  <tr>
-    <td>Non-Workload (Marketplace &amp; Support — stays as-is)</td>
-    <td class="num">{fmt(aws_non_workload)}</td>
-    <td class="num">—</td>
-    <td class="num">{fmt(gcp_nw_od)}</td>
-    <td class="num">{fmt(gcp_nw_1yr)}</td>
-    <td class="num">{fmt(gcp_nw_3yr)}</td>
-  </tr>
-  <tr class="total-row">
-    <td>Total (matches your AWS bill)</td>
-    <td class="num">{fmt(aws_grand)}</td>
-    <td class="num">{fmt(aws_mapped_cost)}</td>
-    <td class="num">{fmt(gcp_grand_od)} {pct_badge(aws_grand, gcp_grand_od)}</td>
-    <td class="num">{fmt(gcp_grand_1yr)} {pct_badge(aws_grand, gcp_grand_1yr)}</td>
-    <td class="num">{fmt(gcp_grand_3yr)} {pct_badge(aws_grand, gcp_grand_3yr)}</td>
-  </tr>
-</table></div>
-<p class="legend">"Mapped AWS Cost" is the AWS spend on rows that actually got a real GCP price (excludes passthrough rows carried at AWS cost 1:1, and non-workload Marketplace/Support).</p>
 <p class="legend">{_verdict_sentence(aws_grand, gcp_grand_od, gcp_grand_1yr, gcp_grand_3yr)}</p>
 
 {capacity_html}
@@ -946,16 +1426,15 @@ def main():
 
 <h2>Cost Comparison by Service</h2>
 <p class="section-meta">Sorted by AWS spend descending. Diff = AWS − GCP On-Demand; <span class="green">green = GCP cheaper</span>, <span class="red">red = GCP more expensive</span>.</p>
-<div class="table-scroll"><table>
+<div class="table-scroll"><table id="detail-table">
   <tr>
     <th>#</th>
     <th>AWS Service → GCP Service</th>
-    <th>Description</th>
+    <th>AWS Instance</th>
+    <th>GCP Mapping</th>
     <th>Region</th>
     <th class="num">AWS</th>
     <th class="num">GCP OD</th>
-    <th class="num">GCP 1yr</th>
-    <th class="num">GCP 3yr</th>
     <th class="num">Diff</th>
   </tr>
   {detail_rows_html}
@@ -966,7 +1445,7 @@ def main():
 <ul class="method">
   <li>AWS Cost and Usage Report (CUR) line items ingested and classified by billing mechanic (compute, storage, data transfer, managed DB, etc.).</li>
   <li>Deterministic mappings applied first (EBS storage types → Persistent Disk, I/O-only charges → ignore, NAT/TGW/ALB → GCP networking equivalents).</li>
-  <li>EC2 and RDS instance families mapped deterministically using instance-family rules (e.g., c-family → C3/C3D, r-family → N4/N2, t-family → E2 by default, ARM → T2A/C4A).</li>
+  <li>EC2 and RDS instance families mapped deterministically using instance-family rules — 4th-gen preferred unconditionally regardless of AWS source generation (e.g., c-family → C4/C4D, r/m-family → N4/N4D, t-family (burstable) → cheapest of E2/N4D by real per-region rate — see cost-tier check below, ARM → C4A). Older-gen families are only used when the 4th-gen SKU has no rate at all in that region.</li>
   <li><b>Cost-tier check</b> (rows marked <span class="cost-tier-note" style="font-style:normal">cost-tier</span> in the description): before finalizing a compute row, the tool compares real GCP prices in that row's exact region and swaps to a cheaper option whenever it's the <i>same or better</i> performance guarantee — e.g. a burstable AWS instance can move to a cheaper always-on GCP family (a pure win: AWS's CPU-credit pricing never gets cheaper by staying idle, so this loses nothing and often costs less). It never does the reverse — a sustained-performance AWS instance is never swapped onto a cheaper burstable GCP family, even if that would look cheaper on paper, since that would silently change the performance guarantee you're paying for. Every such swap is noted inline so it's never a silent decision.</li>
   <li>Remaining dynamic rows (misc, managed services) mapped by LLM agents with GCP billing catalog constraints and confidence scoring.</li>
   <li>GCP list prices sourced from the Cloud Billing API catalog (bundled at report generation time). CUD rates are applied from <code>cud_pct.json</code> per service class.</li>
