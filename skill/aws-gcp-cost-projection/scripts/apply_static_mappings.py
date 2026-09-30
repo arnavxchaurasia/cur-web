@@ -75,8 +75,15 @@ def _load_cud_fallback() -> dict:
 
 CUD_PCT_FALLBACK = _load_cud_fallback()
 
-PUBSUB_MESSAGE_DELIVERY = "Pub/Sub Message Delivery"
-GCP_PUBSUB              = "Pub/Sub"
+# Both were wrong and, combined, made every SQS/SNS/Kinesis per_request row
+# unresolvable regardless of desc_pattern: real catalog service_name is
+# "Cloud Pub/Sub" (not "Pub/Sub" — services.json lookup by exact displayName
+# silently failed, so resolve_sku returned None before ever reaching the SKU
+# scan), and the real SKU is named "Message Delivery Basic" (billed per TiB,
+# ~10 MiB/mo free then $40/TiB) — "Pub/Sub Message Delivery" never matched
+# any real SKU description either. Confirmed via a live catalog sweep.
+PUBSUB_MESSAGE_DELIVERY = "Message Delivery Basic"
+GCP_PUBSUB              = "Cloud Pub/Sub"
 GCP_BALANCED_PD         = "Balanced PD Capacity"
 GCP_HYPERDISK_BALANCED  = "Hyperdisk Balanced Capacity"  # real catalog name, confirmed
 # cheaper than classic Balanced PD Capacity in every region checked (e.g. $0.08 vs
@@ -446,12 +453,31 @@ PER_REQUEST_MAP = [
     # flat_hourly (unit=Hrs) so only per-query rows reach this mapper.
     # Pattern matches catalog SKU "DNS Query (port 53)".
     (r"Route.?53",             "Cloud DNS",       "DNS Query",                     1.0),
-    (r"Rekognition",           "Cloud Vision",    "Vision API Requests",           1.0),
-    (r"Comprehend",            "Natural Language API", "NL API Requests",          1.0),
-    (r"Translate",             "Cloud Translation",   "Translation Characters",    1.0),
-    (r"Polly",                 "Text-to-Speech",  "TTS Characters",                1.0),
-    (r"Transcribe",            "Speech-to-Text",  "STT Audio",                     1.0),
+    # All five of these AI-service entries were broken the same way Pub/Sub
+    # was: found while auditing every resolve_sku() service-name literal in
+    # this file against the real services.json list. Every one of these
+    # service names AND sku_name/desc_pattern strings was wrong — none
+    # matched any real catalog entry, so Rekognition/Comprehend/Translate/
+    # Polly/Transcribe rows always silently fell to passthrough regardless of
+    # bill content, same as SQS/SNS/Kinesis did. Corrected to the real
+    # service names below; SKU-level per-operation pricing (these AWS
+    # services each have several billing dimensions — e.g. Rekognition splits
+    # image vs. video analysis, Transcribe bills per-minute-of-audio, Polly
+    # per-character) has NOT been individually verified unit-for-unit against
+    # each GCP SKU, so `service == GCP_AI_SERVICES` forces honest passthrough
+    # below rather than risk the same unit-mismatch class of bug caught for
+    # Pub/Sub (request-count vs. data-volume) — a real SKU resolving
+    # successfully is not proof the units actually match.
+    (r"Rekognition",           "Cloud Vision API",       "Vision API Requests",     1.0),
+    (r"Comprehend",            "Cloud Natural Language", "NL API Requests",         1.0),
+    (r"Translate",             "Translate",              "Translation Characters",  1.0),
+    (r"Polly",                 "Cloud Text-to-Speech API", "TTS Characters",        1.0),
+    (r"Transcribe",            "Cloud Speech API",       "STT Audio",               1.0),
 ]
+GCP_AI_SERVICES = frozenset({
+    "Cloud Vision API", "Cloud Natural Language", "Translate",
+    "Cloud Text-to-Speech API", "Cloud Speech API",
+})
 
 # block_storage: EBS volume_type → GCP Persistent Disk tier (desc_pattern searched
 # in the Compute Engine catalog). RDS/managed-db storage rows that landed here map
@@ -2733,7 +2759,51 @@ def map_per_request(rows):
                 service, sku_name, mult = match
                 strategy, confidence = "map", 0.85
                 note = f"per_request lookup → {sku_name}"
-                if service == "Cloud Armor":
+                if service == GCP_PUBSUB:
+                    # SQS/SNS/Kinesis rows reach here with total_usage = a
+                    # REQUEST COUNT (AWS bills $/million API calls). The real
+                    # Cloud Pub/Sub SKU this now correctly resolves to
+                    # ("Message Delivery Basic") bills by DATA VOLUME instead
+                    # ($/TiB delivered) — Pub/Sub has no per-request-count SKU
+                    # at all. Multiplying a raw request count by a $/TiB rate
+                    # with unit_multiplier=1.0 would be a catastrophic
+                    # unit-mismatch overprice (a real request count run through
+                    # a per-byte rate), not an honest projection — caught while
+                    # fixing the service-name/SKU-name bug above, which had
+                    # been masking this because resolve_sku always returned
+                    # None before (wrong service name), so it silently never
+                    # got this far to matter. Keep the correct service label,
+                    # but force honest passthrough — same "unit models differ
+                    # too much to convert" call already made for Kinesis
+                    # shard-hours elsewhere in this file.
+                    strategy, confidence = "passthrough", 0.55
+                    note = (
+                        f"per_request → {GCP_PUBSUB} (correct target service), but its "
+                        f"'{sku_name}' SKU bills by data volume ($/TiB delivered) while this "
+                        f"row is a request COUNT (AWS bills $/million API calls) — Pub/Sub has "
+                        f"no per-request-count SKU; converting would require knowing average "
+                        f"message size, which isn't in the CUR. Passthrough at AWS cost, not a "
+                        f"guessed byte-volume conversion"
+                    )
+                elif service in GCP_AI_SERVICES:
+                    # Service name is now correct, but the SKU each AWS service
+                    # actually needs (Rekognition splits image/video analysis,
+                    # Transcribe bills per-minute-of-audio, Polly per-character,
+                    # Comprehend has several NLP operation types, Translate
+                    # bills per-character) hasn't been individually verified
+                    # against the right GCP SKU/unit for each — resolving to
+                    # SOME real SKU under the right service is not proof it's
+                    # the right SKU or the right unit. Honest passthrough with
+                    # the correct service label until each is checked
+                    # individually, same caution as the Pub/Sub case above.
+                    strategy, confidence = "passthrough", 0.50
+                    note = (
+                        f"per_request → {service} (correct target service, corrected from a "
+                        f"previously-wrong service/SKU name that never resolved at all) — but "
+                        f"the specific SKU/unit for this AWS operation type hasn't been "
+                        f"individually verified yet; passthrough at AWS cost until confirmed"
+                    )
+                elif service == "Cloud Armor":
                     # AWS WAF's Bot Control and Fraud Control managed rule
                     # groups are billed as their own, separately-named CUR
                     # line items (confirmed real AWS billing behavior, not
@@ -3859,6 +3929,44 @@ def map_mwaa(rows):
                 f"spec for this environment/worker class — verify with the customer or AWS's "
                 f"MWAA docs before finalizing a sized Composer environment; passthrough at "
                 f"AWS cost until then"
+            ),
+            "mapping_confidence": 0.45,
+        })
+    return out
+
+
+# AWS Systems Manager Parameter Store -> Secret Manager. Swept the local
+# catalog before writing this: it has NO "Secret Manager" service entry at
+# all (unlike API Gateway, where sibling egress SKUs proved the service is
+# actively tracked and simply has no per-call SKU — here there's nothing to
+# cross-check against, so this reads as a real gap in this catalog snapshot,
+# not evidence Secret Manager is free). Honest passthrough with the correct
+# label and AWS's own published rate for context, not a resolved SKU.
+def map_ssm_parameter_store(rows):
+    out = []
+    for r in rows:
+        gcp_region = r.get("gcp_region")
+        ut = r.get("usage_type") or ""
+        is_advanced = "advanced" in ut.lower()
+        tier_label = "Advanced" if is_advanced else "Standard"
+        out.append({
+            "aws_li_key":         r["aws_li_key"],
+            "gcp_service":        "Secret Manager",
+            "gcp_sku_id":         None,
+            "gcp_sku_name":       None,
+            "component":          "api-requests",
+            "strategy":           "passthrough",
+            "unit_multiplier":    1.0,
+            "gcp_region":         gcp_region,
+            "projection_note":    (
+                f"SSM Parameter Store ({tier_label} tier) API requests → Secret Manager, "
+                f"the architecturally closest GCP service for API-accessed config/secret "
+                f"values (AWS rate: $0.05/10,000 API requests for this tier). No Secret "
+                f"Manager SKU found in the local catalog to resolve a real GCP rate against — "
+                f"this catalog snapshot appears to be missing the service entirely (Secret "
+                f"Manager is a real, priced GCP product), not evidence it's free — "
+                f"passthrough at AWS cost until the catalog is refreshed or a rate is "
+                f"confirmed directly"
             ),
             "mapping_confidence": 0.45,
         })
@@ -6973,7 +7081,7 @@ def main():
               ('flat_hourly', 'object_storage', 'per_request', 'block_storage', 'data_transfer',
                'non_workload', 'cloudwatch', 'guardduty', 'inspector', 'marketplace_thirdparty', 'quicksight', 'redshift', 'athena', 'kinesis', 'efs',
                'xray', 'fsx', 'emr', 'elasticache', 'msk', 'compute_windows', 'compute_arm',
-               'compute_burstable', 'managed_db', 'opensearch', 'commitment_discount', 'rds_extended_support', 'glue', 'shield', 'dynamodb_storage', 'mwaa')
+               'compute_burstable', 'managed_db', 'opensearch', 'commitment_discount', 'rds_extended_support', 'glue', 'shield', 'dynamodb_storage', 'mwaa', 'ssm_parameter_store')
     """).fetchall()
     con.close()
 
@@ -6986,7 +7094,7 @@ def main():
                                   "block_storage", "data_transfer", "non_workload", "cloudwatch", "msk",
                                   "guardduty", "inspector", "marketplace_thirdparty", "quicksight", "redshift", "athena", "kinesis", "efs", "xray",
                                   "fsx", "emr", "elasticache", "compute_windows", "compute_arm",
-                                  "compute_burstable", "managed_db", "opensearch", "commitment_discount", "rds_extended_support", "glue", "shield", "dynamodb_storage", "mwaa")}
+                                  "compute_burstable", "managed_db", "opensearch", "commitment_discount", "rds_extended_support", "glue", "shield", "dynamodb_storage", "mwaa", "ssm_parameter_store")}
     for raw in rows:
         r = dict(zip(cols, raw))
         by_group[r["mechanic_group"]].append(r)
@@ -7026,6 +7134,7 @@ def main():
         "shield":               map_shield,
         "dynamodb_storage":     map_dynamodb_storage,
         "mwaa":                 map_mwaa,
+        "ssm_parameter_store":  map_ssm_parameter_store,
     }
     all_llm_rows: list[dict] = []
 

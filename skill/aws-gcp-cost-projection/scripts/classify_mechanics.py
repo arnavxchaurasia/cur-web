@@ -77,7 +77,16 @@ def _re(value: str | None, pattern: str) -> bool:
 # (like "Hours") silently failed their gate and fell through to misc/LLM —
 # same "fix one path, miss the sibling path" bug class documented elsewhere in
 # this file. One shared, case-insensitive helper so this can't drift again.
-_HOURLY_UNITS = frozenset({"hrs", "hours", "hour", "hr", ""})
+#
+# "accelerator-hours" is AWS Global Accelerator's own service-specific unit
+# name for its per-hour fixed fee ("Global-Accelerator-fixed-fee", confirmed
+# real: $99.00 = 3,960 Accelerator-Hours x $0.025/hr across regions on a live
+# bill) — added explicitly, by evidence, rather than matching any unit string
+# ending in "hours" generically: a blanket suffix match would also swallow
+# genuinely different quantities like "GB-Hours" (a GB x hour product, e.g.
+# Lambda-style memory-seconds billing), which is NOT a simple hourly count and
+# must NOT go through this hourly-rate gate.
+_HOURLY_UNITS = frozenset({"hrs", "hours", "hour", "hr", "accelerator-hours", ""})
 
 
 def _is_hourly_unit(unit: str | None) -> bool:
@@ -792,6 +801,28 @@ RULES = [
         ),
     ),
     (
+        # AWS Systems Manager Parameter Store (usage_type "PS-Param-..."/
+        # "PS-Advanced-Param-...") -> Secret Manager, the architecturally
+        # closest GCP service for API-accessed config/secret values. Scoped
+        # to Parameter Store usage_types only — other Systems Manager
+        # sub-services (Automation, Session Manager, Patch Manager, Inventory,
+        # etc.) have no comparable GCP equivalent at all and correctly stay in
+        # misc/LLM. Swept the local catalog before writing this: it has NO
+        # "Secret Manager" service entry whatsoever (unlike, say, BigQuery or
+        # Cloud SQL, which are richly represented) — that reads as a gap in
+        # this catalog snapshot, not evidence Secret Manager isn't priced
+        # (unlike API Gateway, where sibling network-egress SKUs under the
+        # same service DID exist, proving the catalog actively tracks that
+        # service and simply has no per-call SKU for it). So this stays an
+        # honest passthrough with the correct label rather than a resolved
+        # SKU — see map_ssm_parameter_store() for the full reasoning.
+        "ssm_parameter_store",
+        lambda r: (
+            (_ilike(r["product"], "Systems Manager") or _ilike(r["product"], "AWSSystemsManager"))
+            and _re(r.get("usage_type", ""), r"PS-(?:Advanced-)?Param")
+        ),
+    ),
+    (
         # DynamoDB STORAGE rows only (TimedStorage-ByteHrs, TimedPITRStorage-
         # ByteHrs) — a plain capacity charge with a real, directly comparable
         # Firestore storage SKU (same GiB-mo unit, same free-tier shape), NOT
@@ -1410,7 +1441,7 @@ def main():
         "flat_hourly", "object_storage", "per_request",
         "block_storage", "data_transfer", "non_workload", "cloudwatch",
         "guardduty", "inspector", "marketplace_thirdparty", "quicksight", "redshift", "athena", "kinesis", "efs", "xray", "fsx", "emr", "elasticache", "msk",
-        "rds_extended_support", "glue", "shield", "dynamodb_storage", "mwaa",
+        "rds_extended_support", "glue", "shield", "dynamodb_storage", "mwaa", "ssm_parameter_store",
         # compute_windows/compute_arm/compute_burstable each have a dedicated static
         # handler in apply_static_mappings.py that always emits an output entry (map
         # or passthrough fallback) for every row — same shape as the other

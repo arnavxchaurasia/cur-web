@@ -68,7 +68,7 @@ DETERMINISTIC_GROUPS = {
     "block_storage", "data_transfer", "non_workload", "cloudwatch",
     "guardduty", "inspector", "marketplace_thirdparty", "quicksight", "redshift",
     "athena", "kinesis", "efs", "xray", "fsx", "emr", "elasticache", "msk",
-    "rds_extended_support", "glue", "shield", "dynamodb_storage", "mwaa",
+    "rds_extended_support", "glue", "shield", "dynamodb_storage", "mwaa", "ssm_parameter_store",
     "compute_windows", "compute_arm", "compute_burstable",
 }
 

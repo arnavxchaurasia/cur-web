@@ -448,7 +448,7 @@ def test_kinesis_shard_hours_passthrough_pubsub():
     rows = [row(product="Amazon Kinesis",
                 usage_type="Kinesis-ShardHour", unit="Hrs")]
     out = map_kinesis(rows)
-    assert out[0]["gcp_service"] == "Pub/Sub"
+    assert out[0]["gcp_service"] == "Cloud Pub/Sub"
     assert out[0]["strategy"] == "passthrough"
 
 
