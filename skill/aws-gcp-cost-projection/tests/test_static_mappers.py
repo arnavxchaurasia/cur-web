@@ -188,11 +188,20 @@ def test_ebs_io2_block_express_maps_to_extreme_pd():
     # io2 Block Express can reach 256,000 IOPS / 4,000 MB/s — genuinely
     # exceeds Hyperdisk Balanced's ceiling, so Extreme is the correct (only
     # capable) target here, not a downgrade.
+    #
+    # GCP publishes this same Extreme tier under two SKU generations — legacy
+    # "Extreme PD Capacity" and current-generation "Hyperdisk Extreme
+    # Capacity" — and a live catalog sweep found the cheaper one varies by
+    # region (some regions, e.g. us-central1 used by the row() default, only
+    # have the Hyperdisk-generation SKU at all). The mapper dynamically picks
+    # whichever real SKU is cheapest/available in-region rather than hardcoding
+    # one name, so this only asserts the performance TIER (Extreme), not which
+    # generation's name won for this region.
     rows = [row(product="Amazon EC2",
                 usage_type="EBS:VolumeUsage.io2", operation="io2 Block Express volume",
                 volume_type="io2", unit="GB-Mo")]
     out = _with_sku(map_block_storage, rows)
-    assert "Extreme PD" in out[0]["gcp_sku_name"]
+    assert "Extreme" in out[0]["gcp_sku_name"]
 
 
 def test_ebs_snapshot_maps_to_snapshot_sku():
@@ -320,31 +329,54 @@ def test_security_hub_passthrough_to_scc():
 # Redshift → BigQuery
 # ---------------------------------------------------------------------------
 
-def test_redshift_ra3_4xlarge_is_1500_slots():
+def test_redshift_ra3_4xlarge_node_hour_is_honest_passthrough():
+    # No official AWS or Google source publishes a Redshift-node-to-BigQuery-
+    # slot equivalence (checked both vendors' docs directly — see
+    # apply_static_mappings.py's _REDSHIFT_SLOT_MAP comment). The old
+    # unit_multiplier=1500 "map" strategy produced a confirmed +1761%
+    # overprojection on a real job's ra3.4xlarge node-hour rows and, layered
+    # with a separate seconds/hours bug on Concurrency Scaling rows, a
+    # $75.5M/mo phantom charge. This now passthroughs, same treatment as the
+    # Reserved-Instance case in the same function.
     rows = [row(product="Amazon Redshift",
                 usage_type="ra3.4xlarge-NodeUsage", unit="Hrs")]
     out = _with_sku(map_redshift, rows)
-    # Slot-hour pricing is billed under "BigQuery Reservation API", a separate
-    # service from base "BigQuery" — confirmed against the real catalog (the
-    # old "BigQuery" + "Standard Edition Slot Hour" pairing matched nothing at
-    # all, silently failing to resolve a rate in every region).
     assert out[0]["gcp_service"] == "BigQuery Reservation API"
-    assert out[0]["unit_multiplier"] == 1500.0
-    assert out[0]["strategy"] == "map"
+    assert out[0]["strategy"] == "passthrough"
+    assert out[0]["unit_multiplier"] == 1.0
 
 
-def test_redshift_dc2_large_is_500_slots():
+def test_redshift_dc2_large_node_hour_is_honest_passthrough():
     rows = [row(product="Amazon Redshift",
                 usage_type="dc2.large-NodeUsage", unit="Hrs")]
     out = _with_sku(map_redshift, rows)
-    assert out[0]["unit_multiplier"] == 500.0
+    assert out[0]["strategy"] == "passthrough"
+    assert out[0]["unit_multiplier"] == 1.0
 
 
-def test_redshift_serverless_rpu_is_128_slots():
+def test_redshift_serverless_rpu_is_honest_passthrough():
+    # "1 RPU ~= 128 BQ slots" had the same unsourced-ratio problem as the
+    # node-hour table (AWS's own RPU spec is ~2 vCPU/16GB with no published
+    # slot equivalence, and Google's BigQuery slots doc doesn't publish a
+    # vCPU/slot ratio either) — passthrough for the same reason.
     rows = [row(product="Amazon Redshift Serverless",
                 usage_type="ServerlessRPUHours", unit="Hrs")]
     out = _with_sku(map_redshift, rows)
-    assert out[0]["unit_multiplier"] == 128.0
+    assert out[0]["strategy"] == "passthrough"
+    assert out[0]["unit_multiplier"] == 1.0
+
+
+def test_redshift_concurrency_scaling_is_passthrough_not_node_hour():
+    # CONFIRMED REAL BUG: "APS3-CS:ra3.4xlarge" (Concurrency Scaling, billed
+    # in raw SECONDS) used to match the node-hour family-substring loop
+    # (matched "ra3.4xlarge") and get treated as if total_usage were HOURS —
+    # a ~3600x unit blowup stacked on the mapping itself. Must route to
+    # passthrough before the node-hour loop, never through it.
+    rows = [row(product="Amazon Redshift",
+                usage_type="APS3-CS:ra3.4xlarge", unit="seconds")]
+    out = _with_sku(map_redshift, rows)
+    assert out[0]["strategy"] == "passthrough"
+    assert out[0]["unit_multiplier"] == 1.0
 
 
 def test_redshift_backup_passthrough():
@@ -366,13 +398,20 @@ def test_redshift_unknown_type_passthrough():
 # ---------------------------------------------------------------------------
 
 def test_athena_data_scanned_maps_to_bq_analysis():
+    # BigQuery's on-demand Analysis SKU is region-specific ("Analysis
+    # (<region>)"), not one flat worldwide rate — a bare "Analysis" pattern
+    # only resolves for ~2 US multi-region locations and silently under-prices
+    # every other region by ~17%. gcp_sku_name now carries the resolved
+    # region-qualified SKU name rather than the bare pattern, and
+    # unit_multiplier does a real TB->TiB conversion (BigQuery bills per TiB,
+    # Athena's CUR unit is decimal TB) instead of assuming the units match 1:1.
     rows = [row(product="Amazon Athena",
                 usage_type="DataScanned-Bytes", unit="TB")]
     out = _with_sku(map_athena, rows)
     assert out[0]["gcp_service"] == "BigQuery"
-    assert out[0]["gcp_sku_name"] == "Analysis"
+    assert out[0]["gcp_sku_name"].startswith("Analysis")
     assert out[0]["strategy"] == "map"
-    assert out[0]["unit_multiplier"] == 1.0
+    assert out[0]["unit_multiplier"] == pytest.approx(1e12 / (1024**4), rel=1e-6)
 
 
 def test_athena_ddl_passthrough():
@@ -554,6 +593,37 @@ def test_cloudwatch_metrics_passthrough():
                 usage_type="MetricMonitorUsage", unit="Count")]
     out = _with_sku(map_cloudwatch, rows)
     assert out[0]["strategy"] == "passthrough"
+
+
+def test_cloudwatch_custom_metrics_low_volume_ignored():
+    # Real AWS CUR shape: usage_type "...CW:MetricMonitorUsage" + operation
+    # "MetricStorage" (verified against the raw CUR pricing description text,
+    # "$0.30 per metric-month for the first 10,000 metrics"). Small metric
+    # counts stay under GCP's free tier under any normal sampling rate.
+    rows = [row(product="AmazonCloudWatch",
+                usage_type="APS3-CW:MetricMonitorUsage",
+                operation="MetricStorage", unit="Metrics", total_usage=500.0)]
+    out = _with_sku(map_cloudwatch, rows)
+    assert out[0]["strategy"] == "ignore"
+    assert out[0]["gcp_service"] == "Cloud Monitoring"
+
+
+def test_cloudwatch_custom_metrics_high_volume_not_silently_zeroed():
+    # Regression for job 6a561187: an 11,764-metric / $3,013 row was previously
+    # missed by the "metric month" text-only regex (operation is "MetricStorage",
+    # never that literal phrase) and fell through to the generic passthrough
+    # bucket. It must now be recognized as custom-metrics, and because the count
+    # is far above the "tens-to-hundreds" range the ignore/$0 assumption relies
+    # on, it must NOT be silently zeroed either — it should route to review with
+    # the AWS cost kept as a placeholder.
+    rows = [row(product="AmazonCloudWatch",
+                usage_type="APS3-CW:MetricMonitorUsage",
+                operation="MetricStorage", unit="Metrics",
+                total_usage=11764.42, aws_amortized_cost=3013.00)]
+    out = _with_sku(map_cloudwatch, rows)
+    assert out[0]["strategy"] == "review"
+    assert out[0]["gcp_service"] == "Cloud Monitoring"
+    assert out[0]["unit_multiplier"] == 1.0
 
 
 # ---------------------------------------------------------------------------

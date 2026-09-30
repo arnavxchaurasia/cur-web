@@ -372,10 +372,23 @@ func phaseSpecs(inputExt string) []phaseSpec {
 			// the watcher, so its repairs never applied in-pipeline (D4).
 			PostLLMScripts: []string{"?scripts/validate_fix.py $JOBDIR"},
 			CheckName:      "no_null_projected_cost",
-			CheckSQL: "SELECT count(*) FROM gcp_projection " +
-				"WHERE strategy IN ('map','break_down') " +
-				"AND gcp_projected_cost IS NULL " +
-				"AND aws_amortized_cost > 1",
+			// validate_fix.py already computes null_gcp_service and gcp_service_echo
+			// as hard violations in validation_report.json, but it's invoked as a
+			// SOFT ('?') script above — its own exit(1) is logged and thrown away,
+			// and no later phase gate re-checked either condition, so a passthrough
+			// row with gcp_service left NULL (or echoing the AWS product name back)
+			// sailed all the way into the final report unlabeled/unjustified.
+			// Folding both checks into this enforced CheckSQL is what actually
+			// blocks the job on them, instead of only logging a violation nobody reads.
+			CheckSQL: "SELECT " +
+				"(SELECT count(*) FROM gcp_projection WHERE strategy IN ('map','break_down') " +
+				"AND gcp_projected_cost IS NULL AND aws_amortized_cost > 1) + " +
+				"(SELECT count(*) FROM gcp_projection WHERE is_workload AND strategy NOT IN ('ignore') " +
+				"AND (gcp_service IS NULL OR TRIM(gcp_service) = '') AND aws_amortized_cost > 1) + " +
+				"(SELECT count(*) FROM gcp_projection WHERE is_workload AND strategy NOT IN ('ignore') " +
+				"AND gcp_service IS NOT NULL AND (LOWER(gcp_service) LIKE 'amazon %' " +
+				"OR LOWER(gcp_service) LIKE 'aws %' OR LOWER(gcp_service) LIKE 'amazon%') " +
+				"AND aws_amortized_cost > 5)",
 		},
 		{
 			Num: 5, Name: "Outlier Triage", Activity: "Running outlier queries",

@@ -23,6 +23,10 @@ import duckdb
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from egress_rates import EGRESS_SKUS, cdn_egress_rate
 from config_loader import load_data_config as _cfg
+try:
+    from aws_normalizer import canonical_service
+except Exception:  # pragma: no cover
+    canonical_service = lambda _p: None
 
 _inst_cfg = _cfg("instance-specs")
 _gcp_cfg  = _cfg("gcp-model-config")
@@ -621,6 +625,45 @@ def _family_hourly_rate(gcp_service, desc_pattern, gcp_region):
     return rate
 
 
+def _cheapest_same_tier_sku(gcp_service, candidate_desc_patterns, gcp_region):
+    """Sweep several desc_patterns that all represent the SAME performance tier
+    (e.g. GCP's legacy "Extreme PD ..." vs current-generation "Hyperdisk
+    Extreme ..." SKUs — same guarantee, different product line/pricing) and
+    return the (desc_pattern, sku_id, rate) for whichever is cheapest AND
+    actually available in this exact region.
+
+    This exists because hardcoding one name is unsafe: a live sweep across all
+    regions found Hyperdisk Extreme IOPS is cheaper than legacy Extreme PD IOPS
+    in every one of 36 regions checked, but for Extreme Capacity the two are
+    genuinely mixed (13 regions Hyperdisk-cheaper, 7 legacy-cheaper, 16 tied) —
+    no static preference is correct for both. Never silently substitutes a
+    DIFFERENT (lower) performance tier here — every candidate passed in must
+    already be pre-verified to match the required tier by the caller; this
+    function only picks among same-tier alternatives, the same restriction
+    cheapest_in_scope() applies to compute family candidates.
+
+    Returns (None, None, None) if no candidate has a resolvable rate.
+    """
+    best = None  # (rate, desc_pattern)
+    for desc_pattern in candidate_desc_patterns:
+        rate = _family_hourly_rate(gcp_service, desc_pattern, gcp_region)
+        # A real disk-capacity/IOPS/throughput SKU is never legitimately priced
+        # at exactly $0 — that pattern only ever shows up for contract/
+        # negotiated-pricing SKUs the public Billing Catalog can't price
+        # (confirmed for Cloud Armor Enterprise elsewhere), never for Compute
+        # Engine disk performance SKUs. Treat it as unresolved rather than a
+        # real (and misleadingly "free") rate.
+        if rate is None or rate <= 0:
+            continue
+        if best is None or rate < best[0]:
+            best = (rate, desc_pattern)
+    if best is None:
+        return None, None, None
+    rate, desc_pattern = best
+    sku_id = resolve_sku(gcp_service, desc_pattern, gcp_region)
+    return desc_pattern, sku_id, rate
+
+
 # Confirmed real, reviewable exceptions where the Cloud Billing Catalog lists
 # a priced SKU for a (family, region) pair that Compute Engine will not
 # actually let you deploy — the Billing Catalog and the real machine-type-
@@ -646,6 +689,30 @@ _KNOWN_PHANTOM_AVAILABILITY = {
     ])
 }
 
+# Qualifiers that make a SKU a more-specific or differently-priced variant of
+# whatever plain SKU a desc_pattern is actually asking for. Shared by both
+# lookup_sku_in_catalog() (which SKU ID a caller gets) and
+# _family_hourly_rate_uncached() (what rate a cost SWEEP compares) — these two
+# functions used to carry independent, drifted exclusion lists, which is
+# exactly the "fix one path, miss the sibling path" bug this file's own
+# comments repeatedly warn about. Confirmed real: _cheapest_same_tier_sku()'s
+# rate sweep for "Hyperdisk Extreme Capacity" matched "Asynchronous Replication
+# Protection - Hyperdisk Extreme Capacity in Mumbai" ($0.052/GiBy-mo) because
+# _family_hourly_rate_uncached() had no noise filter at all, while
+# resolve_sku() (via lookup_sku_in_catalog(), which DID already exclude that
+# qualifier) correctly resolved the plain SKU ($0.13/GiBy-mo) — the compared
+# rate and the resolved SKU ID silently belonged to two different products.
+_NOISE_QUALIFIERS = ["autoclass", "early delete", "dual-region", "multi-region", "regional",
+                     "asynchronous replication protection", "confidential mode"]
+
+
+def _is_noise_variant(desc_pattern, sku_desc):
+    """True if sku_desc carries a _NOISE_QUALIFIERS term the caller's own
+    desc_pattern didn't ask for (so it's a different, not-requested variant)."""
+    desc_lower = sku_desc.lower()
+    pattern_lower = desc_pattern.lower()
+    return any(q in desc_lower and q not in pattern_lower for q in _NOISE_QUALIFIERS)
+
 
 def _family_hourly_rate_uncached(gcp_service, desc_pattern, gcp_region):
     if (desc_pattern, gcp_region) in _KNOWN_PHANTOM_AVAILABILITY:
@@ -670,6 +737,8 @@ def _family_hourly_rate_uncached(gcp_service, desc_pattern, gcp_region):
         # matches a plain GPU desc_pattern and prices at exactly $0/hr, which
         # would make it look like the cheapest option in any sweep that hits it.
         if any(q in desc_lower for q in ("preemptible", "reserved", "commitment", "dws defined duration")):
+            continue
+        if _is_noise_variant(desc_pattern, desc):
             continue
         geo = sku.get("geoTaxonomy", {})
         regions = sku.get("serviceRegions", [])
@@ -1210,7 +1279,18 @@ def lookup_sku_in_catalog(gcp_service, desc_pattern, gcp_region):
         if geo.get("type") == "GLOBAL":
             return True
         regions = sku.get("serviceRegions", [])
-        return bool(gcp_region and gcp_region in regions)
+        if gcp_region and gcp_region in regions:
+            return True
+        # Some services (confirmed: Cloud Firestore) set serviceRegions=["global"]
+        # on every SKU regardless of where it's actually priced, and put the real
+        # per-region/per-multi-region split in geoTaxonomy.regions instead
+        # (geoTaxonomy.type is "REGIONAL"/"MULTI_REGIONAL", not "GLOBAL", so the
+        # branch above doesn't fire either). Without this, resolve_sku() can
+        # never find a match for ANY region on these services — not a one-region
+        # gap, every region fails region-matching identically, silently forcing
+        # passthrough for the entire service regardless of desc_pattern.
+        geo_regions = geo.get("regions", [])
+        return bool(gcp_region and gcp_region in geo_regions)
 
     def _continent_region_match(sku):
         # Some families (T2A, newer/niche SKUs) are only sold in a subset of a
@@ -1239,14 +1319,12 @@ def lookup_sku_in_catalog(gcp_service, desc_pattern, gcp_region):
     # gp2/gp3 EBS row. Callers that DO want the regional tier (Cloud SQL HA,
     # Filestore Enterprise) already write "Regional" into their own desc_pattern,
     # so they're unaffected — _has_noise() only excludes a qualifier absent from
-    # the caller's own pattern.
-    _NOISE_QUALIFIERS = ["autoclass", "early delete", "dual-region", "multi-region", "regional",
-                         "asynchronous replication protection", "confidential mode"]
-
+    # the caller's own pattern. _NOISE_QUALIFIERS/_is_noise_variant() are shared
+    # module-level (defined above _family_hourly_rate_uncached) so this
+    # function's SKU-ID choice and that function's rate-sweep can never drift
+    # onto two different SKUs for the same desc_pattern again.
     def _has_noise(sku_desc):
-        desc_lower = sku_desc.lower()
-        pattern_lower = desc_pattern.lower()
-        return any(q in desc_lower and q not in pattern_lower for q in _NOISE_QUALIFIERS)
+        return _is_noise_variant(desc_pattern, sku_desc)
 
     desc_matches = [sku for sku in skus
                     if re.search(desc_pattern, sku.get("description", ""), re.IGNORECASE)]
@@ -2023,6 +2101,47 @@ def map_flat_hourly(rows):
                 })
             continue
 
+        # VPC IP Address Manager (IPAM) Advanced Tier per-active-IP-hour fee
+        # ("APS3-IPAddressManager-IP-Hours" / operation "IPAM-Active-IP") —
+        # CONFIRMED REAL BUG: no entry in FLAT_HOURLY_MAP matches "IPAM" or
+        # "IPAddressManager" at all, so every one of these rows fell through
+        # to the FLAT_HOURLY_DEFAULT_DESC ("Other Hourly Charge") sentinel,
+        # which resolve_sku() then substring/word-overlap-matched onto
+        # "Static Ip Charge" (SKU 66A2-68EA-56BE) — a coincidental match with
+        # no semantic relationship to IPAM: Static Ip Charge bills a reserved-
+        # but-unattached external IP address, not per-IP inventory tracking.
+        # That SKU is also only sold in us-central1/us-east1/us-west1/
+        # asia-east1/europe-west1 in the catalog — never asia-south1 — so
+        # applying it here additionally cross-region-substituted a price from
+        # a region this job isn't even in. Verified against AWS's own pricing
+        # page: IPAM Advanced Tier bills $0.00027/active-IP-hour (this row's
+        # own rate: $546.58 / 2,024,354.99 hours = $0.00027 exactly, confirming
+        # the AWS side is genuinely IPAM, not a per-instance IP charge).
+        # Verified GCP has no billed equivalent: Google Cloud's IP inventory
+        # tooling (Internal Range API, VPC subnet/CIDR reservation) is a free
+        # building-block feature of VPC networking, not a separately metered
+        # IPAM product the way AWS Advanced Tier is — there is no real SKU to
+        # map to. The wrong "Static Ip Charge" mapping inflated this one row
+        # 37x ($546.58 AWS → $20,243.54 GCP) and was the single largest
+        # distortion in the entire report before this fix.
+        if re.search(r"IPAddressManager|IPAM", f"{r.get('usage_type') or ''} {r.get('operation') or ''}", re.IGNORECASE):
+            out.append({
+                "aws_li_key":       r["aws_li_key"],
+                "gcp_service":      None,
+                "gcp_sku_id":       None,
+                "gcp_sku_name":     None,
+                "component":        "hourly",
+                "strategy":         "passthrough",
+                "unit_multiplier":  1.0,
+                "gcp_region":       r.get("gcp_region"),
+                "projection_note":  ("VPC IPAM Advanced Tier per-active-IP-hour fee — no GCP "
+                                     "equivalent (Google Cloud's IP inventory/reservation tooling "
+                                     "is a free VPC building-block feature, not a separately "
+                                     "metered IPAM product); passthrough at cost parity"),
+                "mapping_confidence": 0.85,
+            })
+            continue
+
         match = _match(r.get("usage_type"), r.get("product"), FLAT_HOURLY_MAP, r.get("operation"))
         if match:
             service, desc_pattern, mult = match
@@ -2446,7 +2565,17 @@ def map_per_request(rows):
         # Class A Operations instead of Pub/Sub, because "APS3" contains "s3".
         # AWS's real S3 product name always contains "simple storage" anyway,
         # so the bare "s3" check added collision risk with no real coverage gain.
-        if "simple storage" in product:
+        #
+        # Some bills carry `product` as AWS's raw ProductCode ("AmazonS3") rather
+        # than the friendly name ("Amazon Simple Storage Service") — confirmed
+        # real on a live customer bill, where ingest.py's own product-name
+        # extraction can miss it depending on the bill's export shape. Falling
+        # back to canonical_service() (Layer 1, aws_normalizer.py's alias table)
+        # catches that raw code too, without reintroducing the bare-"s3"
+        # collision risk above: canonical_service is exact-alias-keyed, not a
+        # substring match, so "Amazon Simple Queue Service APS3-..." still
+        # resolves to "sqs", never "s3".
+        if "simple storage" in product or canonical_service(product) == "s3":
             ut = (r.get("usage_type") or "").lower()
             op = (r.get("operation") or "").lower()
             blob = ut + " " + op
@@ -2720,8 +2849,16 @@ def map_block_storage(rows):
             r"mibps|throughput(?!\s*optimized)|volumep.iops|volumep-iops|million i.?o requests",
             blob, re.IGNORECASE)
         if is_iops_or_throughput:
-            is_managed_db = any(k in product for k in
-                                ("rds", "relational", "aurora", "documentdb", "memorydb", "elasticache"))
+            # canonical_service() fallback catches raw ProductCode forms that
+            # don't contain any of the friendly-name fragments below — confirmed
+            # real: "AmazonDocDB" (DocumentDB's actual raw code) contains
+            # neither "documentdb" nor any other keyword here, same class of
+            # gap already fixed for S3/EFS/RDS/VPC elsewhere in this pipeline.
+            is_managed_db = (
+                any(k in product for k in
+                    ("rds", "relational", "aurora", "documentdb", "memorydb", "elasticache"))
+                or canonical_service(product) in ("rds", "aurora", "documentdb", "memorydb", "elasticache")
+            )
             gp3_like = "gp3" in blob.lower() or "gp2" in blob.lower()
             
             if is_managed_db:
@@ -2836,21 +2973,61 @@ def map_block_storage(rows):
                         "mapping_confidence": 0.92,
                     })
                 else:
-                    # io1/io2 provisioned IOPS/throughput: no direct Hyperdisk Extreme rate match
+                    # io1/io2 provisioned IOPS: unlike gp3's Hyperdisk Balanced IOPS
+                    # above, this branch used to hardcode passthrough on the claim
+                    # "no direct Hyperdisk Extreme rate match" WITHOUT ever calling
+                    # resolve_sku() to check. Confirmed false for the IOPS case: a
+                    # genuine $5,113.65 io2 IOPS row on a real customer bill sat as
+                    # an unpriced passthrough because of this.
+                    #
+                    # GCP has TWO SKU generations at the SAME (Extreme) performance
+                    # tier for IOPS: legacy "Extreme PD IOPS" and current-generation
+                    # "Hyperdisk Extreme IOPS" — a live sweep across 36 regions found
+                    # Hyperdisk cheaper in every single one, but this is checked
+                    # dynamically per region rather than hardcoded, since the
+                    # analogous Capacity SKU pair is NOT uniformly one-sided (mixed
+                    # 13/7/16 across the same 36 regions) — no static preference is
+                    # safe in general, so every region-scoped call re-verifies both.
+                    # Throughput genuinely has no Extreme-tier SKU of either name
+                    # anywhere in the catalog (checked: zero matches across all
+                    # regions), so only attempt resolution for the IOPS case —
+                    # throughput keeps an honest passthrough, same as before.
+                    if is_iops:
+                        iops_desc, iops_sku, iops_rate = _cheapest_same_tier_sku(
+                            GCP_COMPUTE_ENGINE,
+                            ["Hyperdisk Extreme IOPS", "Extreme PD IOPS"],
+                            gcp_region,
+                        )
+                    else:
+                        iops_desc, iops_sku, iops_rate = None, SKUMeta(None), None
+                    gcp_sku_name = iops_desc or "Extreme PD IOPS"
                     out.append({
                         "aws_li_key":       r["aws_li_key"],
                         "gcp_service":      GCP_COMPUTE_ENGINE,
-                        "gcp_sku_name":     "Extreme PD IOPS",
-                        "component":        "storage",
-                        "strategy":         "passthrough",
+                        "gcp_sku_id":       iops_sku,
+                        "gcp_sku_name":     gcp_sku_name,
+                        "component":        "iops" if is_iops else "storage",
+                        "strategy":         "map" if iops_sku else "passthrough",
                         "unit_multiplier":  1.0,
                         "gcp_region":       gcp_region,
-                        "projection_note":  "EBS io1/io2 provisioned IOPS/throughput fee — maps to PD Extreme; passthrough at cost parity",
-                        "mapping_confidence": 0.60,
+                        "projection_note":  (
+                            f"EBS io1/io2 provisioned IOPS → {gcp_sku_name} (${iops_rate:.4f}/IOPS-mo, cheapest of "
+                            f"Hyperdisk Extreme / legacy Extreme PD in this region); region={gcp_region}"
+                            if iops_sku else
+                            "EBS io1/io2 provisioned IOPS/throughput fee — maps to PD Extreme; passthrough at cost parity"
+                            + ("" if is_iops else " (no Extreme-tier throughput SKU exists in the catalog)")
+                        ),
+                        "mapping_confidence": 0.80 if iops_sku else 0.60,
                     })
             continue
-        is_managed_db = any(k in product for k in
-                            ("rds", "relational", "aurora", "documentdb", "memorydb", "elasticache"))
+        # canonical_service() fallback catches raw ProductCode forms with no
+        # friendly-name fragment (e.g. "AmazonDocDB") — see comment on the
+        # sibling is_managed_db check above.
+        is_managed_db = (
+            any(k in product for k in
+                ("rds", "relational", "aurora", "documentdb", "memorydb", "elasticache"))
+            or canonical_service(product) in ("rds", "aurora", "documentdb", "memorydb", "elasticache")
+        )
 
         # Aurora/RDS per-I/O request charges: billed as "N million I/O requests".
         # Cloud SQL includes I/O in the storage price — no separate per-I/O charge.
@@ -2871,6 +3048,7 @@ def map_block_storage(rows):
             })
             continue
 
+        _extreme_capacity_override = None
         if is_managed_db:
             service = GCP_CLOUD_SQL
             if "backup" in ut or "backup" in op:
@@ -2981,6 +3159,21 @@ def map_block_storage(rows):
                 desc = GCP_HYPERDISK_BALANCED
             else:
                 desc = EBS_VOLUME_MAP.get(vol, EBS_DEFAULT_DESC)
+                # io2 Block Express (the only io1/io2 case that reaches this
+                # EBS_VOLUME_MAP fallback — the standard-tier case above routes
+                # to Hyperdisk Balanced instead): GCP publishes the same
+                # Extreme performance guarantee under two SKU generations,
+                # legacy "Extreme PD Capacity" and current "Hyperdisk Extreme
+                # Capacity". Unlike Extreme IOPS (Hyperdisk cheaper in every
+                # one of 36 regions swept), a live sweep of Capacity across
+                # the same 36 regions found this pair genuinely mixed (13
+                # regions Hyperdisk-cheaper, 7 legacy-cheaper, 16 tied) — no
+                # static preference is safe, so re-check both per region.
+                if vol in ("io1", "io2") and desc == EBS_VOLUME_MAP.get(vol):
+                    cap_desc, cap_sku, cap_rate = _cheapest_same_tier_sku(
+                        service, ["Hyperdisk Extreme Capacity", "Extreme PD Capacity"], gcp_region)
+                    if cap_desc:
+                        _extreme_capacity_override = (cap_desc, cap_sku, cap_rate)
             note = f"EBS {vol or 'volume'}{' snapshot' if is_snapshot else ''} → {desc}"
             if vol in ("io1", "io2") and desc == GCP_HYPERDISK_BALANCED:
                 note += (" (io1/io2 standard tier caps at 64,000 IOPS/1,000 MB/s, within "
@@ -2991,7 +3184,13 @@ def map_block_storage(rows):
                          "series/zones in GCP, unlike classic Persistent Disk's broader "
                          "attachment support — verify VM type compatibility with customer]")
 
-        sku_id = resolve_sku(service, desc, gcp_region)
+        if _extreme_capacity_override:
+            desc, sku_id, cap_rate = _extreme_capacity_override
+            note = (f"EBS {vol or 'volume'} (Block Express) → {desc} "
+                     f"(${cap_rate:.4f}/GiBy-mo, cheapest of Hyperdisk Extreme / legacy Extreme PD "
+                     f"Capacity in this region)")
+        else:
+            sku_id = resolve_sku(service, desc, gcp_region)
         entry = {
             "aws_li_key":       r["aws_li_key"],
             "gcp_service":      service,
@@ -3470,6 +3669,94 @@ def map_guardduty(rows):
     return out
 
 
+# AWS Shield Advanced's flat $3,000/mo subscription. The prior version of
+# service_map.json's "shield" rule swept only the "Networking"-service Cloud
+# Armor Enterprise SKUs (Security Policy / Security Policy Rule / Requests —
+# all real but rate_usd=0.0, negotiated/contract pricing not exposed via the
+# public catalog) and concluded no priced GCP SKU exists, forcing passthrough.
+# Re-swept the FULL catalog (not just "Networking") before writing this mapper
+# — the Annual Subscription base fee SKU lives under the "Compute Engine"
+# service instead, and IS priced: $3,000.00/mo flat, global, exact dollar
+# parity with AWS's list price. That's the real per-tier match (AWS Shield
+# Advanced also requires a 1-year commitment, same as Cloud Armor Enterprise's
+# Annual tier — not the Paygo tier, which has a different fee structure).
+GCP_CLOUD_ARMOR_ENTERPRISE_SKU_SERVICE = GCP_COMPUTE_ENGINE
+GCP_CLOUD_ARMOR_ENTERPRISE_SUB_DESC = r"Monthly Fee for Cloud Armor Enterprise Annual Subscription"
+
+
+def map_shield(rows):
+    out = []
+    for r in rows:
+        gcp_region = r.get("gcp_region")
+        sku_id = resolve_sku(GCP_CLOUD_ARMOR_ENTERPRISE_SKU_SERVICE, GCP_CLOUD_ARMOR_ENTERPRISE_SUB_DESC, gcp_region)
+        note = (
+            "AWS Shield Advanced monthly subscription → Cloud Armor Enterprise Annual "
+            "Subscription (real catalog SKU, $3,000/mo flat, global — exact list-price "
+            "parity, both require a 1-year commitment tier)"
+        ) + _no_rate_suffix(sku_id, gcp_region)
+        entry = {
+            "aws_li_key":         r["aws_li_key"],
+            "gcp_service":        "Cloud Armor Enterprise",
+            "gcp_sku_id":         sku_id if sku_id else None,
+            "gcp_sku_name":       "Cloud Armor Enterprise Annual Subscription",
+            "component":          "subscription",
+            "strategy":           "map" if sku_id else "passthrough",
+            "unit_multiplier":    1.0,
+            "gcp_region":         gcp_region,
+            "projection_note":    note,
+            "mapping_confidence": 0.90 if sku_id else 0.60,
+        }
+        out.append(entry)
+    return out
+
+
+# DynamoDB storage (standard + PITR backup) -> Firestore storage. Swept the
+# real catalog before writing this: Cloud Firestore publishes region-specific
+# "Cloud Firestore Storage {region}" and "Cloud Firestore Point-in-time
+# Recovery Storage {region}" SKUs (both GiBy.mo, both with a real free-tier
+# threshold) that are a direct, non-workload-dependent match for DynamoDB's
+# TimedStorage-ByteHrs/TimedPITRStorage-ByteHrs rows — unlike RCU/WCU
+# (Firestore bills per-operation, not per-provisioned-capacity, so that part
+# genuinely needs workload judgment and stays LLM-guided, per the pricing
+# matrix). Desc patterns explicitly ask for "(with free tier)" and anchor on
+# the non-Enterprise wording, or the catalog's Enterprise-edition variants
+# (a different, differently-priced Firestore product) or the flat-rate
+# no-free-tier variants would be an equally valid regex match by accident.
+_DYNAMODB_STORAGE_SKU_DESC = r"^Cloud Firestore Storage .*\(with free tier\)$"
+_DYNAMODB_PITR_SKU_DESC = r"^Cloud Firestore Point-in-time Recovery Storage .*\(with free tier\)$"
+
+
+def map_dynamodb_storage(rows):
+    out = []
+    for r in rows:
+        gcp_region = r.get("gcp_region")
+        op = (r.get("operation") or "").lower()
+        is_pitr = "pitr" in op
+        desc_pattern = _DYNAMODB_PITR_SKU_DESC if is_pitr else _DYNAMODB_STORAGE_SKU_DESC
+        component = "pitr-storage" if is_pitr else "storage"
+        sku_id = resolve_sku("Cloud Firestore", desc_pattern, gcp_region)
+        note = (
+            ("DynamoDB PITR backup storage → Cloud Firestore Point-in-time Recovery Storage"
+             if is_pitr else
+             "DynamoDB table storage → Cloud Firestore Storage")
+            + " (same GiB-month unit, real region-specific rate + free tier — not workload-"
+              "dependent like RCU/WCU, which stay LLM-guided)"
+        ) + _no_rate_suffix(sku_id, gcp_region)
+        out.append({
+            "aws_li_key":         r["aws_li_key"],
+            "gcp_service":        "Firestore",
+            "gcp_sku_id":         sku_id if sku_id else None,
+            "gcp_sku_name":       "Cloud Firestore Point-in-time Recovery Storage" if is_pitr else "Cloud Firestore Storage",
+            "component":          component,
+            "strategy":           "map" if sku_id else "passthrough",
+            "unit_multiplier":    1.0,
+            "gcp_region":         gcp_region,
+            "projection_note":    note,
+            "mapping_confidence": 0.85 if sku_id else 0.55,
+        })
+    return out
+
+
 def map_inspector(rows):
     """Amazon Inspector → Security Command Center Premium passthrough.
 
@@ -3706,6 +3993,95 @@ _ACU_RE = re.compile(
     r"ServerlessV2|Serverless\s+v2|:ACU|Capacity\s+Unit\s+hour",
     re.IGNORECASE,
 )
+
+
+# RDS Extended Support (AWS charges a per-vCPU-hour surcharge for running an
+# engine version past its community EOL date — usage_type looks like
+# "ExtendedSupport:Yr1-Yr2:MySQL8.0" or "ExtendedSupport:Yr3-Yr5:PostgreSQL11").
+#
+# Swept the real Cloud SQL SKU catalog (data/catalog.duckdb) before writing this
+# mapper, per the "check GCP's actual catalog before deciding map vs ignore"
+# methodology — GCP genuinely publishes its own Extended Support surcharge SKUs,
+# billed the same way AWS does (a flat $/vCPU-hour rate, independent of instance
+# shape: "Cloud SQL for MySQL: Zonal - Extended support vCPU v56 in Mumbai"),
+# in every region including asia-south1. But that catalog only has entries for
+# MySQL 5.6/5.7 and PostgreSQL 9.6-13 (v-codes below) — there is no MySQL 8.0
+# entry at all, in any region, as of this catalog snapshot. So a blanket
+# "GCP has no equivalent surcharge, it disappears entirely" (the old
+# service_map.json reasoning this replaces) is FALSE for 5.6/5.7 engines, where
+# a real priced SKU exists and should be mapped — and only PROVISIONALLY true
+# for 8.0, pending GCP publishing its own Extended Support tier for it (AWS's
+# and GCP's EOL timelines for the same engine version don't move in lockstep).
+_EXTENDED_SUPPORT_RE = re.compile(
+    r"ExtendedSupport:(?:Yr\d(?:-Yr\d)?):(MySQL|PostgreSQL)\s*([\d.]+)",
+    re.IGNORECASE,
+)
+
+# AWS version string -> GCP catalog's v-code suffix (confirmed present in the
+# swept catalog; anything absent from this map has no matching GCP SKU today).
+_EXT_SUPPORT_GCP_VCODE = {
+    "mysql": {"5.6": "56", "5.7": "57"},
+    "postgresql": {"9.6": "96", "10": "10", "11": "11", "12": "12", "13": "13"},
+}
+
+
+def map_rds_extended_support(rows: list[dict]) -> list[dict]:
+    out = []
+    for r in rows:
+        ut = r.get("usage_type") or ""
+        m = _EXTENDED_SUPPORT_RE.search(ut)
+        gcp_region = r.get("gcp_region")
+        engine = (m.group(1) if m else "").lower()
+        version = (m.group(2) if m else "").strip()
+        vcode = _EXT_SUPPORT_GCP_VCODE.get(engine, {}).get(version)
+        engine_label = "MySQL" if engine == "mysql" else "PostgreSQL" if engine == "postgresql" else (m.group(1) if m else "the engine")
+        # Multi-AZ AWS deployment -> Regional Cloud SQL tier (HA); Single-AZ -> Zonal.
+        tier = "Regional" if "multi-az" in (r.get("deployment_option") or "").lower() else "Zonal"
+
+        if vcode:
+            desc_pattern = (
+                rf"Cloud SQL for {engine_label}: {tier} - Extended support vCPU v{vcode}\b"
+            )
+            sku_id = resolve_sku(GCP_CLOUD_SQL, desc_pattern, gcp_region)
+            note = (
+                f"RDS Extended Support ({engine_label} {version}, {tier.lower()}) → Cloud SQL "
+                f"for {engine_label}'s own Extended Support vCPU-hour surcharge (same billing "
+                f"unit as AWS — $/vCPU-hour, independent of instance shape)"
+            ) + _no_rate_suffix(sku_id, gcp_region)
+            out.append({
+                "aws_li_key":         r["aws_li_key"],
+                "gcp_service":        GCP_CLOUD_SQL,
+                "gcp_sku_id":         sku_id if sku_id else None,
+                "gcp_sku_name":       f"Cloud SQL for {engine_label}: {tier} - Extended support vCPU",
+                "component":          "extended-support",
+                "strategy":           "map" if sku_id else "passthrough",
+                "unit_multiplier":    1.0,
+                "gcp_region":         gcp_region,
+                "projection_note":    note,
+                "mapping_confidence": 0.85 if sku_id else 0.55,
+            })
+        else:
+            engine_desc = f"{m.group(1)} {version}" if m else (ut or "unknown engine")
+            note = (
+                f"RDS Extended Support ({engine_desc}) — no matching Cloud SQL Extended Support "
+                f"SKU found for this engine version (GCP currently publishes this surcharge only "
+                f"for MySQL 5.6/5.7 and PostgreSQL 9.6-13); treated as $0 on GCP for now — "
+                f"re-verify once GCP extends Extended Support pricing to this version, since AWS "
+                f"and GCP EOL timelines for the same engine differ"
+            )
+            out.append({
+                "aws_li_key":         r["aws_li_key"],
+                "gcp_service":        "N/A (no GCP Extended Support SKU for this version)",
+                "gcp_sku_id":         None,
+                "gcp_sku_name":       None,
+                "component":          "extended-support",
+                "strategy":           "ignore",
+                "unit_multiplier":    0.0,
+                "gcp_region":         gcp_region,
+                "projection_note":    note,
+                "mapping_confidence": 0.55,
+            })
+    return out
 
 
 def map_managed_db(rows: list[dict]) -> list[dict]:
@@ -4095,21 +4471,53 @@ def map_elasticache(rows: list) -> list:
 
 # Redshift node-type → BigQuery Standard Edition slot-hour conversion table.
 # Edit data/instance-specs.json → redshift_slot_map to add new node types.
+#
+# CONFIRMED REAL: the claim this table was previously documented with — "sourced
+# from AWS/BigQuery's own published migration-guide capacity recommendations" —
+# does NOT hold up. Checked both primary sources directly:
+#   - AWS's own RA3/DC2 node spec table (docs.aws.amazon.com/redshift/latest/
+#     mgmt/working-with-clusters.html) publishes vCPU/RAM/slices per node, but
+#     no BigQuery-slot equivalence of any kind (AWS has no reason to publish one).
+#   - Google's own BigQuery slots doc (docs.cloud.google.com/bigquery/docs/slots)
+#     defines a slot as "a virtual compute unit" and explicitly does NOT state a
+#     vCPU or RAM equivalent — Google deliberately does not publish one, since
+#     BigQuery's Dremel execution model isn't node-for-node comparable to a
+#     Redshift MPP cluster. No official Redshift-node → BigQuery-slot migration
+#     table exists at either vendor.
+#   - This table's own numbers are internally inconsistent with that unstated
+#     assumption anyway: dividing each slot count by AWS's published vCPU count
+#     gives ~125 slots/vCPU for every RA3 size (250/2, 500/4, 1500/12, 6000/48)
+#     but 250 slots/vCPU for DC2 (500/2, 4000/32) — the same 2-vCPU node type
+#     (dc2.large vs ra3.large) getting a 2x different slots-per-vCPU ratio, with
+#     no documented reason, is not what a real sourced table would look like.
+#   - Independent estimates for BigQuery's own slot-to-vCPU ratio (not official,
+#     but load-bearing here since no official one exists) cluster around 0.5
+#     vCPU per slot — i.e. ~2 slots/vCPU — roughly 60x smaller than this table's
+#     ~125 slots/vCPU. A real-world Redshift→BigQuery sizing case study (100TB
+#     workload, 6× ra3.4xlarge ≈ 600 BQ Enterprise slots) independently implies
+#     ~100 slots per ra3.4xlarge node, ~15x smaller than this table's 1500.
+#   - Confirmed on a real job: this table's 1500 slots/ra3.4xlarge produced a
+#     +$10,763/mo (1761%) overprojection on ordinary node-hour rows, and (via a
+#     separate seconds/hours unit bug layered on top) a $75.5M/mo phantom charge
+#     on a Concurrency Scaling row — see the "APS3-CS:" check above.
+#
+# Given no authoritative source exists and every independent cross-check says
+# this table overstates slots-per-node by 15-60x, these numbers are kept ONLY
+# as a rough scale reference (still used to size the ballpark shown in the
+# projection_note); the actual pricing decision below no longer trusts them
+# enough to emit a confident "map" strategy — see the on-demand branch further
+# down, which now passthroughs with a loud caveat instead, same treatment this
+# function already gives the Reserved-Instance case for the identical reason
+# (CLAUDE.md: never claim precision the evidence doesn't support).
 _REDSHIFT_SLOT_MAP = _inst_cfg.get("redshift_slot_map", {
     "dc2.large": 500, "dc2.8xlarge": 4000,
     "ds2.xlarge": 500, "ds2.8xlarge": 4000,
     "ra3.large": 250, "ra3.xlplus": 500,
     "ra3.4xlarge": 1500, "ra3.16xlarge": 6000,
 })
-# ra3.large (AWS's smaller, cheaper entry-level RA3 tier, added after the
-# original xlplus/4xlarge/16xlarge lineup) was missing entirely — confirmed
-# real: a customer bill billing "$0.618 per Redshift RA3.LARGE Compute
-# Node-hour" fell through to unpriced passthrough. Unlike the other slot
-# counts (sourced from AWS/BigQuery's own published migration-guide capacity
-# recommendations), ra3.large has no equivalent official guidance yet — 250
-# is estimated from AWS's own published spec (2 vCPU/16GiB, roughly half of
-# ra3.xlplus's 4 vCPU/32GiB/500-slot recommendation), not a sourced figure.
-_REDSHIFT_SLOT_ESTIMATED = {"ra3.large"}
+# Every entry in this table is unsourced (see block above) — all node types are
+# now treated as estimated, not just ra3.large.
+_REDSHIFT_SLOT_ESTIMATED = set(_REDSHIFT_SLOT_MAP.keys())
 # Both of these were wrong against the real bundled catalog — confirmed live:
 # "Standard Edition Slot Hour" matches nothing at all (the real per-region SKU
 # is "BigQuery Standard Edition for <City> (<region>)", and it's billed under
@@ -4136,6 +4544,41 @@ def map_redshift(rows):
         op  = (r.get("operation")  or "").lower()
         gcp_region = r.get("gcp_region")
         blob = f"{ut} {op} {(r.get('product') or '').lower()}"
+
+        # Concurrency Scaling ("APS3-CS:ra3.4xlarge") → passthrough, never the
+        # node-hour/slot-hour path below. CONFIRMED REAL BUG: this usage_type's
+        # instance-family substring ("ra3.4xlarge") still matches the node-hour
+        # family-map loop further down, which assumes total_usage is in HOURS.
+        # But AWS bills Concurrency Scaling in raw SECONDS (pricing_unit=
+        # 'seconds' on the actual CUR row) — feeding that straight into the
+        # slots × hourly-slot-rate formula as if it were hours produced a
+        # ~3600x unit blowup on top of the mapping itself: one job's CS: row
+        # (total_usage=1,094,494 seconds ≈ 304 real node-hours, AWS cost
+        # $1,116) priced out to $75,520,086/mo — a 67,660x overprojection on a
+        # single line item, the dominant line in the entire report. Concurrency
+        # Scaling is also a fundamentally different AWS charge (bursty,
+        # per-second temporary capacity for query spikes beyond the free
+        # credits) with no distinct BigQuery line item — BigQuery Reservations
+        # autoscale slots within the reservation rather than billing a
+        # separate burst-capacity SKU — so there is no unit-compatible target
+        # to map to even after fixing the seconds/hours conversion.
+        if re.search(r'\bcs:', ut):
+            out.append({
+                "aws_li_key":         r["aws_li_key"],
+                "gcp_service":        "BigQuery",
+                "gcp_sku_id":         None,
+                "gcp_sku_name":       None,
+                "component":          "compute",
+                "strategy":           "passthrough",
+                "unit_multiplier":    1.0,
+                "gcp_region":         gcp_region,
+                "projection_note":    ("Redshift Concurrency Scaling (per-second burst capacity) — "
+                                       "no BigQuery equivalent charge (BQ Reservations autoscale "
+                                       "slots within the reservation, no separate burst SKU); "
+                                       "passthrough at cost parity"),
+                "mapping_confidence": 0.60,
+            })
+            continue
 
         # Backup and snapshot rows → passthrough (no BQ equivalent charge)
         if "backup" in blob or "snapshot" in blob:
@@ -4180,23 +4623,38 @@ def map_redshift(rows):
             out.append(entry)
             continue
 
-        # Serverless RPU hours → BigQuery slot-hours (1 RPU ≈ 128 BQ slots)
+        # Serverless RPU hours → BigQuery slot-hours.
+        # CONFIRMED REAL: the "1 RPU ≈ 128 BQ slots" ratio here has the same
+        # sourcing problem as _REDSHIFT_SLOT_MAP above. AWS's own Redshift
+        # Serverless docs (docs.aws.amazon.com/redshift/latest/mgmt/
+        # serverless-capacity.html) publish 1 RPU = 16 GB memory (~2 vCPU per
+        # third-party sources; AWS doesn't state vCPU officially either), and
+        # Google's own BigQuery slots doc explicitly does not publish a
+        # slot-to-vCPU/RAM ratio — so there is no official basis for "128" any
+        # more than there was for the node-hour table. Using the same ~0.5
+        # vCPU/slot community estimate applied there, 1 RPU (~2 vCPU) would
+        # land closer to ~4 slots, not 128 — a ~32x gap in the same direction
+        # (overstated) as the node-hour bug. Passthrough for the same reason:
+        # no defensible slot-to-price ratio from real evidence.
         if "serverless" in blob or re.search(r"\brpu\b", ut):
-            sku_id = resolve_sku(GCP_BIGQUERY_RESERVATION, _BQ_SLOT_SKU, gcp_region)
             entry = {
                 "aws_li_key":         r["aws_li_key"],
                 "gcp_service":        GCP_BIGQUERY_RESERVATION,
-                "gcp_sku_name":       _BQ_SLOT_SKU,
+                "gcp_sku_id":         None,
+                "gcp_sku_name":       None,
                 "component":          "compute",
-                "strategy":           "map" if sku_id else "passthrough",
-                "unit_multiplier":    128.0,
+                "strategy":           "passthrough",
+                "unit_multiplier":    1.0,
                 "gcp_region":         gcp_region,
-                "projection_note":    "Redshift Serverless RPU → BigQuery slot-hours (1 RPU ≈ 128 BQ Standard slots)" + _no_rate_suffix(sku_id, gcp_region),
-                "mapping_confidence": 0.65,
+                "projection_note":    ("Redshift Serverless RPU-hour — passthrough at AWS cost. No "
+                                       "official AWS or Google source publishes an RPU-to-BigQuery-slot "
+                                       "equivalence; a commonly-cited RPU spec (~2 vCPU) against "
+                                       "BigQuery's own unofficial ~0.5 vCPU/slot estimate suggests the "
+                                       "previous 128-slot assumption overstated real slot requirements "
+                                       "by roughly 32x. Passthrough pending a real BigQuery Reservation "
+                                       "sizing exercise with the customer's actual query workload."),
+                "mapping_confidence": 0.45,
             }
-            if sku_id:
-                entry["gcp_sku_id"] = sku_id
-                entry["gcp_sku_unit"] = sku_id.unit
             out.append(entry)
             continue
 
@@ -4261,27 +4719,43 @@ def map_redshift(rows):
                 }
                 out.append(entry)
             else:
-                sku_id = resolve_sku(GCP_BIGQUERY_RESERVATION, _BQ_SLOT_SKU, gcp_region)
-                note = f"Redshift {matched_family} node-hour → BigQuery {slots} Standard slot-hours"
-                if matched_family in _REDSHIFT_SLOT_ESTIMATED:
-                    note += (f" [architecture review recommended: {slots} slots for {matched_family} is "
-                             "an estimate derived from AWS's published node spec (no official AWS/BigQuery "
-                             "migration-guide capacity recommendation exists for this node type yet) — "
-                             "verify actual workload sizing with customer before finalizing]")
+                # CONFIRMED REAL: this used to be strategy="map" against the
+                # unsourced _REDSHIFT_SLOT_MAP table (see the block above it —
+                # no official AWS or Google migration guide publishes a
+                # Redshift-node → BigQuery-slot equivalence, the table's own
+                # numbers are internally inconsistent by 2x between DC2 and RA3
+                # for the same vCPU count, and independent cross-checks put the
+                # real ratio 15-60x lower than this table's values). Confirmed
+                # on a real job: matched_family=ra3.4xlarge produced a
+                # +$10,763/mo (1761%) overprojection on ordinary node-hour rows
+                # here, and — combined with a separate seconds/hours bug on
+                # Concurrency Scaling rows using the same family-substring
+                # match — a $75.5M/mo phantom charge on a single line item.
+                # Rather than keep emitting a confidently-priced number this
+                # codebase's own research can't stand behind, this now gets the
+                # same honest-passthrough treatment already used for the
+                # Reserved-Instance case just above (identical reasoning: no
+                # defensible slot-to-price ratio from real evidence).
+                note = (f"Redshift {matched_family} node-hour ({slots} BigQuery Standard slot-hours "
+                        f"estimate) — passthrough at AWS cost. No official AWS or Google migration "
+                        f"guide publishes a Redshift-node-to-BigQuery-slot equivalence (checked both "
+                        f"vendors' own docs directly); this table's slot counts are a rough, internally "
+                        f"inconsistent estimate that independent cross-checks suggest overstate real "
+                        f"slot requirements by roughly 15-60x, which would silently overprice this row "
+                        f"by the same factor if mapped with confidence. Passthrough pending a real "
+                        f"BigQuery Reservation sizing exercise with the customer's actual query workload.")
                 entry = {
                     "aws_li_key":         r["aws_li_key"],
                     "gcp_service":        GCP_BIGQUERY_RESERVATION,
-                    "gcp_sku_name":       _BQ_SLOT_SKU,
+                    "gcp_sku_id":         None,
+                    "gcp_sku_name":       None,
                     "component":          "compute",
-                    "strategy":           "map" if sku_id else "passthrough",
-                    "unit_multiplier":    float(slots),
+                    "strategy":           "passthrough",
+                    "unit_multiplier":    1.0,
                     "gcp_region":         gcp_region,
-                    "projection_note":    note + _no_rate_suffix(sku_id, gcp_region),
-                    "mapping_confidence": 0.55 if matched_family in _REDSHIFT_SLOT_ESTIMATED else 0.70,
+                    "projection_note":    note,
+                    "mapping_confidence": 0.45,
                 }
-                if sku_id:
-                    entry["gcp_sku_id"] = sku_id
-                    entry["gcp_sku_unit"] = sku_id.unit
                 out.append(entry)
         else:
             # Unrecognized Redshift row → passthrough with note
@@ -4357,7 +4831,22 @@ def map_cloudwatch(rows):
         # under any realistic sampling rate, but a customer with unusually
         # high-frequency or high-cardinality custom metrics should verify
         # actual ingested volume against the real GCP free-tier threshold.
-        is_custom_metrics = bool(re.search(r"metric.?month", op, re.IGNORECASE)) and not is_alarm
+        # Detection previously only matched literal "metric month"/"metricmonth" text
+        # in `operation` — but the real AWS CUR shape for this charge is usage_type
+        # "...CW:MetricMonitorUsage" + operation "MetricStorage" (verified against the
+        # raw CUR pricing description: "$0.30 per metric-month for the first 10,000
+        # metrics"), which never contains that literal phrase. The regex-only check
+        # silently missed every genuine custom-metrics row and let them fall through
+        # to the generic count-based passthrough below (carrying the full AWS cost
+        # forward as if it were a GCP charge) — confirmed on job 6a561187 where an
+        # 11,764-metric / $3,013 row was misrouted this way. Match on the actual
+        # usage_type/operation signature first; keep the description-text regex
+        # (checked against dash_blob, not just `op`) as a fallback for PDF bills
+        # whose usage_type is empty.
+        is_custom_metrics = (
+            ("metricmonitorusage" in ut and op == "metricstorage")
+            or bool(re.search(r"metric.?month", dash_blob, re.IGNORECASE))
+        ) and not is_alarm
 
         # PutLogEvents = pure log ingestion (not multi-component CloudWatch).
         # Checked against dash_blob (product+usage_type+operation), not just
@@ -4454,25 +4943,62 @@ def map_cloudwatch(rows):
             out.append(entry)
             continue
         elif is_custom_metrics:
-            entry = {
-                "aws_li_key":         r["aws_li_key"],
-                "gcp_service":        "Cloud Monitoring",
-                "gcp_sku_id":         None,
-                "gcp_sku_name":       None,
-                "component":          "custom-metrics",
-                "strategy":           "ignore",
-                "unit_multiplier":    0.0,
-                "gcp_region":         gcp_region,
-                "projection_note":    (
-                    "CloudWatch custom metrics → $0 on GCP: Cloud Monitoring bills custom-"
-                    "metric ingestion by volume (first 150 MiB/project/month free), not per-"
-                    "metric-count like AWS. Assumption: this metric count is well below the "
-                    "free-tier volume under normal sampling rates — verify actual ingested "
-                    "MiB/month with the customer if this bill shows unusually high-frequency "
-                    "or high-cardinality custom metrics"
-                ),
-                "mapping_confidence": 0.60,
-            }
+            # GCP's real SKU for this (catalog A924-09D0-8854, "Metric Volume", $0.258/
+            # $0.151/$0.061 per MiB tiered, 150 MiB/project/month free) bills by INGESTED
+            # BYTES, which the AWS CUR never exposes (depends on sample frequency and
+            # label cardinality, not metric count alone) — so no dollar figure computed
+            # from a metric count alone is a real GCP price; fabricating a bytes-per-
+            # metric conversion factor with no verified source would be worse than not
+            # pricing it. For ordinary metric counts (tens-to-hundreds) the free tier
+            # safely absorbs it under any realistic sampling rate, so $0 is a defensible
+            # placeholder. But that assumption breaks down well before it reaches the
+            # thousands: silently zeroing a charge at that scale would hide a real cost
+            # rather than just approximate it, so route those to review (keep the AWS
+            # cost forward as a conservative placeholder) instead of ignore.
+            custom_metric_qty = float(r.get("total_usage") or 0.0)
+            HIGH_VOLUME_METRIC_THRESHOLD = 1000
+            if custom_metric_qty > HIGH_VOLUME_METRIC_THRESHOLD:
+                entry = {
+                    "aws_li_key":         r["aws_li_key"],
+                    "gcp_service":        "Cloud Monitoring",
+                    "gcp_sku_id":         None,
+                    "gcp_sku_name":       None,
+                    "component":          "custom-metrics",
+                    "strategy":           "review",
+                    "unit_multiplier":    1.0,
+                    "gcp_region":         gcp_region,
+                    "projection_note":    (
+                        f"CloudWatch custom metrics ({custom_metric_qty:,.0f} metric-months) → "
+                        "GCP Cloud Monitoring bills custom-metric ingestion by volume (Metric "
+                        "Volume SKU A924-09D0-8854, $0.258/MiB after 150 MiB/project/month free), "
+                        "not per-metric-count like AWS — this count is far above the range where "
+                        "the free tier can safely be assumed to cover it, so the AWS cost is kept "
+                        "as a conservative placeholder rather than zeroed; verify actual ingested "
+                        "MiB/month with the customer for a real GCP number (very likely lower "
+                        "than this AWS figure, but not derivable from metric count alone)"
+                    ),
+                    "mapping_confidence": 0.40,
+                }
+            else:
+                entry = {
+                    "aws_li_key":         r["aws_li_key"],
+                    "gcp_service":        "Cloud Monitoring",
+                    "gcp_sku_id":         None,
+                    "gcp_sku_name":       None,
+                    "component":          "custom-metrics",
+                    "strategy":           "ignore",
+                    "unit_multiplier":    0.0,
+                    "gcp_region":         gcp_region,
+                    "projection_note":    (
+                        "CloudWatch custom metrics → $0 on GCP: Cloud Monitoring bills custom-"
+                        "metric ingestion by volume (first 150 MiB/project/month free), not per-"
+                        "metric-count like AWS. Assumption: this metric count is well below the "
+                        "free-tier volume under normal sampling rates — verify actual ingested "
+                        "MiB/month with the customer if this bill shows unusually high-frequency "
+                        "or high-cardinality custom metrics"
+                    ),
+                    "mapping_confidence": 0.60,
+                }
             out.append(entry)
             continue
         elif is_dashboard:
@@ -4627,8 +5153,33 @@ def map_athena(rows):
     (same unit, directly comparable). We map at unit_multiplier=1.0 — the
     total_usage (bytes or GB/TB scanned) maps to BigQuery Analysis pricing.
     If bytes_scanned is not in the usage unit, passthrough with note.
+
+    BigQuery's on-demand Analysis SKU is NOT one flat worldwide rate — the
+    catalog publishes a separate "Analysis ({region})" SKU per region (54 of
+    them), each its own priced tier ($6.25/TiB in US-default regions, $7.50/
+    TiB in most others including asia-south1 — confirmed by sweeping the real
+    catalog before writing this: the bare "Analysis" SKU with no region suffix
+    only covers ~2 (US multi-region) locations and silently under-prices every
+    other region by ~17% if used as if it were universal). A bare desc_pattern
+    of "Analysis" also loses the region match entirely for any other region —
+    `lookup_sku_in_catalog`'s noise-qualifier filter excludes the region-
+    suffixed variants because the caller's pattern didn't ask for that
+    qualifier, so the search finds only the (region-mismatched) bare SKU and
+    returns no match at all, forcing this row to strategy='passthrough' for
+    every Athena bill outside the ~2 default regions — this was silently true
+    for every single previous run of this mapper, not specific to this bill.
+    Try the exact region-specific SKU first; fall back to the bare
+    multi-region default only if this exact region has no dedicated SKU yet.
+
+    Unit conversion: the GCP Analysis SKU bills per BINARY TiB (usage_unit=
+    "TiBy"), but AWS Athena's DataScannedInTB usage_type is DECIMAL TB
+    (10^12 bytes) — 1 TiB = 1.0995 TB, so treating them as equal (the old
+    unit_multiplier=1.0) over-projects by ~10% regardless of region. Some
+    bill formats report the same charge in GB or raw bytes instead of TB
+    (pricing_unit varies by export format) — converted here explicitly
+    rather than assumed, so this isn't silently wrong for those either.
     """
-    _BQ_ANALYSIS_SKU = "Analysis"
+    _BYTES_PER_TIB = 2 ** 40
     out = []
     for r in rows:
         ut  = (r.get("usage_type") or "").lower()
@@ -4636,19 +5187,50 @@ def map_athena(rows):
 
         # Passthrough for non-data-scanned rows (CTAS, DDL, cancelled, limits)
         if re.search(r"data.?scanned|bytes.?scanned|tb.?scanned", ut):
-            sku_id = resolve_sku("BigQuery", _BQ_ANALYSIS_SKU, gcp_region)
-            # Athena bills in TB; BigQuery Analysis SKU is also /TB → multiplier=1.0
-            # Unit conversion note: if CUR usage_type shows bytes, the projection
-            # framework uses total_usage directly against the rate — verify unit matches.
+            region_pattern = rf"^Analysis \({re.escape(gcp_region)}\)$" if gcp_region else None
+            candidates = []
+            if region_pattern:
+                candidates.append(("BigQuery", region_pattern, f"Analysis ({gcp_region})"))
+            candidates.append(("BigQuery", r"^Analysis$", "Analysis (multi-region default — no per-region SKU for this region)"))
+            sku_id, sku_display, fallback_used, _ = resolve_sku_with_fallback(candidates, gcp_region)
+
+            # Order matters: "terabytes"/"gigabytes" both contain the substring
+            # "byte", so the generic raw-bytes check must run LAST, or every
+            # TB/GB-labeled row gets misdetected as raw bytes (a ~10^9-10^12x
+            # under-conversion — confirmed this exact miscategorization while
+            # testing this fix: pricing_unit="Terabytes" matched "byte" before
+            # the "tb"/"terabyte" check ever got a chance to run).
+            pricing_unit = (r.get("unit") or "").lower()
+            if "terabyte" in pricing_unit or pricing_unit in ("tb", "tbs"):
+                unit_mult = 1e12 / _BYTES_PER_TIB
+                unit_note = "decimal TB → TiB"
+            elif "gigabyte" in pricing_unit or pricing_unit in ("gb", "gbs"):
+                unit_mult = 1e9 / _BYTES_PER_TIB
+                unit_note = "decimal GB → TiB"
+            elif "byte" in pricing_unit:
+                unit_mult = 1.0 / _BYTES_PER_TIB
+                unit_note = "raw bytes → TiB"
+            else:
+                # Default/documented AWS unit for this usage_type: decimal TB.
+                unit_mult = 1e12 / _BYTES_PER_TIB
+                unit_note = "decimal TB → TiB (assumed — pricing_unit blank/unrecognized)"
+
+            note = (
+                f"Athena data-scanned → BigQuery Analysis (on-demand, per-TiB; first 1 TiB/mo "
+                f"free — real rate varies by region, applied from the resolved SKU; {unit_note} "
+                f"conversion applied, {unit_mult:.4f}x)"
+            )
+            if fallback_used:
+                note += f" [no dedicated Analysis SKU for {gcp_region} — used the multi-region default rate instead, which may not match this region's real published rate]"
             entry = {
                 "aws_li_key":         r["aws_li_key"],
                 "gcp_service":        "BigQuery",
-                "gcp_sku_name":       _BQ_ANALYSIS_SKU,
+                "gcp_sku_name":       sku_display,
                 "component":          "analysis",
                 "strategy":           "map" if sku_id else "passthrough",
-                "unit_multiplier":    1.0,
+                "unit_multiplier":    unit_mult if sku_id else 1.0,
                 "gcp_region":         gcp_region,
-                "projection_note":    "Athena data-scanned → BigQuery Analysis ($6.25/TB on-demand; first 1 TB/mo free)" + _no_rate_suffix(sku_id, gcp_region),
+                "projection_note":    note + _no_rate_suffix(sku_id, gcp_region),
                 "mapping_confidence": 0.85,
             }
             if sku_id:
@@ -4966,6 +5548,69 @@ def _emr_vcpus(usage_type, instance_vcpus):
     if m:
         return _EMR_VCPU_MAP.get(m.group(1).lower())
     return None
+
+
+GCP_DATAFLOW = "Cloud Dataflow"
+
+# 1 AWS Glue standard DPU (G.1X worker) = 4 vCPU + 16 GiB memory — AWS's own
+# published Glue worker-type spec. Confirmed via a real catalog sweep before
+# writing this (per the "check GCP's actual SKUs before deciding" methodology):
+# Cloud Dataflow has real, separately-billed "vCPU Time Batch" ($/vCPU-hr) and
+# "RAM Time" ($/GiB-hr) SKUs in every region including asia-south1 — no bundled
+# DPU-equivalent SKU exists on the GCP side, so a DPU-hour has to be split into
+# its vCPU and RAM components and priced against each rate independently.
+_GLUE_DPU_VCPU = 4.0
+_GLUE_DPU_RAM_GIB = 16.0
+# Batch vs Streaming pricing differs (~23% higher for Streaming on both vCPU
+# and RAM SKUs) but Glue's CUR usage_type/operation never distinguish Streaming
+# ETL jobs from standard batch ETL jobs — defaulting to Batch (Glue's dominant,
+# far more common job type) is a disclosed assumption, not a detected fact.
+_GLUE_VCPU_SKU_DESC = r"^vCPU Time Batch\b"
+_GLUE_RAM_SKU_DESC = r"^RAM Time (?!Streaming|Arm|FlexRS)"
+
+
+def map_glue(rows):
+    """AWS Glue ETL/Crawler DPU-hours -> Cloud Dataflow vCPU + RAM FORMULA.
+
+    Only rows with a real DPU-Hour usage figure reach this mapper (classify_
+    mechanics.py gates on pricing_unit); Glue rows with no DPU count in the
+    CUR (Catalog-Storage, Catalog-Request, etc.) are left to misc/LLM, per the
+    pricing matrix's documented "PASS when DPU absent" design.
+    """
+    out = []
+    for r in rows:
+        gcp_region = r.get("gcp_region")
+        dpu_hours = r.get("total_usage") or 0.0
+        op = (r.get("operation") or "").lower()
+        job_kind = "Crawler" if "crawler" in op else "ETL job"
+
+        vcpu_sku = resolve_sku(GCP_DATAFLOW, _GLUE_VCPU_SKU_DESC, gcp_region)
+        ram_sku = resolve_sku(GCP_DATAFLOW, _GLUE_RAM_SKU_DESC, gcp_region)
+
+        note = (
+            f"AWS Glue {job_kind} DPU-hours → Cloud Dataflow Batch (1 DPU ≈ 4 vCPU + "
+            f"16 GiB, AWS's own G.1X worker spec; assumes Batch, not Streaming — Glue's "
+            f"CUR data never distinguishes the two)"
+        )
+        components = [
+            ("vcpu", vcpu_sku, _GLUE_DPU_VCPU, "Dataflow vCPU Time (Batch)"),
+            ("ram", ram_sku, _GLUE_DPU_RAM_GIB, "Dataflow RAM Time"),
+        ]
+        for comp, sku, mult, desc in components:
+            strategy = "map" if sku else "passthrough"
+            out.append({
+                "aws_li_key":         r["aws_li_key"],
+                "gcp_service":        GCP_DATAFLOW,
+                "gcp_sku_id":         sku if sku else None,
+                "gcp_sku_name":       desc,
+                "component":          comp,
+                "strategy":           strategy,
+                "unit_multiplier":    mult,
+                "gcp_region":         gcp_region,
+                "projection_note":    note + _no_rate_suffix(sku, gcp_region),
+                "mapping_confidence": 0.65,
+            })
+    return out
 
 
 def map_emr(rows):
@@ -6070,7 +6715,7 @@ def main():
               ('flat_hourly', 'object_storage', 'per_request', 'block_storage', 'data_transfer',
                'non_workload', 'cloudwatch', 'guardduty', 'inspector', 'marketplace_thirdparty', 'quicksight', 'redshift', 'athena', 'kinesis', 'efs',
                'xray', 'fsx', 'emr', 'elasticache', 'msk', 'compute_windows', 'compute_arm',
-               'compute_burstable', 'managed_db', 'opensearch', 'commitment_discount')
+               'compute_burstable', 'managed_db', 'opensearch', 'commitment_discount', 'rds_extended_support', 'glue', 'shield', 'dynamodb_storage')
     """).fetchall()
     con.close()
 
@@ -6083,7 +6728,7 @@ def main():
                                   "block_storage", "data_transfer", "non_workload", "cloudwatch", "msk",
                                   "guardduty", "inspector", "marketplace_thirdparty", "quicksight", "redshift", "athena", "kinesis", "efs", "xray",
                                   "fsx", "emr", "elasticache", "compute_windows", "compute_arm",
-                                  "compute_burstable", "managed_db", "opensearch", "commitment_discount")}
+                                  "compute_burstable", "managed_db", "opensearch", "commitment_discount", "rds_extended_support", "glue", "shield", "dynamodb_storage")}
     for raw in rows:
         r = dict(zip(cols, raw))
         by_group[r["mechanic_group"]].append(r)
@@ -6118,6 +6763,10 @@ def main():
         "commitment_discount": map_commitment_discount,
         "managed_db":          map_managed_db,
         "opensearch":          map_opensearch,
+        "rds_extended_support": map_rds_extended_support,
+        "glue":                 map_glue,
+        "shield":               map_shield,
+        "dynamodb_storage":     map_dynamodb_storage,
     }
     all_llm_rows: list[dict] = []
 

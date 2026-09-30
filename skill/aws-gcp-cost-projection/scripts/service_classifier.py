@@ -13,8 +13,23 @@ Per matched rule:
                     figure), clear the SKU, set confidence, stamp the reason.
                     Used for services whose correct GCP target is known but whose
                     precise GCP pricing still needs per-service modelling.
+                    NEVER applied to a row already in a DETERMINISTIC_GROUPS
+                    mechanic_group (see below) — those come from a dedicated
+                    static mapper in apply_static_mappings.py, never the LLM, so
+                    forcing passthrough over them would silently discard a real,
+                    resolved SKU-based price. Such a row is left completely
+                    untouched (not even 'keep'-stamped — the rule's confidence/
+                    reason describe the AWS product in general, which may be a
+                    different, more uncertain sub-charge than the one the static
+                    mapper actually priced). It still applies to 'misc' rows
+                    even when the LLM already set strategy='map' — that's the
+                    intentional anti-hallucination backstop (a rule like this one
+                    can mean "the LLM's target/SKU for this service can't be
+                    trusted yet", which a mechanic_group alone can't tell apart
+                    from "this row was priced by a real, reviewed static mapper").
   - mode 'keep'   : the pipeline already prices this well — only STAMP metadata
                     (category + reason), never touch pricing or the mapped SKU.
+                    Safe for every row regardless of mechanic_group.
 
 Rich metadata is written to projection_note as:
   "[<category>] <reason> (rule=service_map_v1, gcp=<target>)"
@@ -37,12 +52,39 @@ except Exception:  # pragma: no cover
 
 RULE_TAG = "service_map_v1"
 
+# Mirrors classify_mechanics.py's skip_groups: mechanic_groups whose rows are
+# ALWAYS priced by a dedicated static mapper in apply_static_mappings.py and
+# NEVER reach the LLM at all (classify_mechanics.py excludes them from the LLM
+# manifest entirely). A 'review'/'ignore' service_map rule must not force these
+# back to passthrough/ignore — that would silently discard a real, resolved
+# SKU-based price a static mapper just computed (confirmed real for DynamoDB
+# storage and AWS Shield: both got a dedicated deterministic mapper, but the
+# pre-existing generic "dynamodb"/"shield" service_map rules — written before
+# those mappers existed — still matched by product name and stomped the
+# mapper's strategy='map' back to 'passthrough' on every run).
+DETERMINISTIC_GROUPS = {
+    "commitment_discount", "negative_cost",
+    "flat_hourly", "object_storage", "per_request",
+    "block_storage", "data_transfer", "non_workload", "cloudwatch",
+    "guardduty", "inspector", "marketplace_thirdparty", "quicksight", "redshift",
+    "athena", "kinesis", "efs", "xray", "fsx", "emr", "elasticache", "msk",
+    "rds_extended_support", "glue", "shield", "dynamodb_storage",
+    "compute_windows", "compute_arm", "compute_burstable",
+}
+
 
 def _norm(product):
+    # Prefixes are checked WITHOUT a trailing space requirement: many real CUR
+    # bills give product as the compact concatenated form ("AmazonSES",
+    # "AmazonMSK", "AmazonWAF", ...) with no space after "Amazon"/"AWS" at all.
+    # Requiring one (the previous "Amazon "/"AWS " check) left every short-code
+    # match rule ("msk", "waf", "dax", ...) unable to match compact-form bills —
+    # same root cause as the aws_normalizer.py canonical_service() prefix bug.
     p = (product or "")
-    for pre in ("Amazon ", "AWS "):
+    for pre in ("Amazon", "AWS"):
         if p.startswith(pre):
-            p = p[len(pre):]
+            p = p[len(pre):].lstrip()
+            break
     return p.lower()
 
 
@@ -82,8 +124,12 @@ def main():
 
     con = duckdb.connect(db)
     rows = con.execute(
-        "SELECT DISTINCT c.product, c.usage_type "
-        "FROM aws_li_to_gcp_li m JOIN aws_li_catalog c USING(aws_li_key)"
+        "SELECT DISTINCT c.product, c.usage_type, "
+        "       BOOL_OR(c.mechanic_group IN ("
+        + ",".join("?" for _ in DETERMINISTIC_GROUPS) +
+        "       )) OVER (PARTITION BY c.product, c.usage_type) AS is_deterministic "
+        "FROM aws_li_to_gcp_li m JOIN aws_li_catalog c USING(aws_li_key)",
+        list(DETERMINISTIC_GROUPS),
     ).fetchall()
 
     # Skip comment/divider entries that carry no "match" key.
@@ -91,8 +137,8 @@ def main():
 
     cs_rule_cache = {}
     review_updates, keep_updates, ignore_updates = [], [], []
-    stats = {"review": 0, "keep": 0, "ignore": 0, "unmatched": 0}
-    for (product, usage_type) in rows:
+    stats = {"review": 0, "keep": 0, "ignore": 0, "unmatched": 0, "protected": 0}
+    for (product, usage_type, is_deterministic) in rows:
         cs_product = canonical_service(product)
         rule = next(
             (r for r in rules if _rule_matches(r, product, usage_type, cs_product, cs_rule_cache)),
@@ -110,7 +156,20 @@ def main():
         conf = rule.get("confidence", 60 if mode == "review" else 90 if mode == "ignore" else 80)
         if conf > 1:
             conf = conf / 100.0
-        if mode == "review":
+        if mode in ("review", "ignore") and is_deterministic:
+            # A dedicated static mapper already priced this row for real —
+            # leave it completely untouched, not even a 'keep'-style stamp.
+            # This rule's confidence/reason were calibrated for a DIFFERENT
+            # sub-charge of the same AWS product (e.g. "dynamodb"'s 50%
+            # confidence describes RCU/WCU workload-dependent guessing, not
+            # storage — applying it here via 'keep''s LEAST() would wrongly
+            # drag a well-evidenced 0.85 down to 0.50, and 'keep' would
+            # replace the mapper's own accurate note with text that
+            # contradicts it (e.g. calling this row "workload-dependent"
+            # when the whole reason it's protected is that it demonstrably
+            # isn't) — confirmed real while verifying this fix.
+            stats["protected"] += 1
+        elif mode == "review":
             review_updates.append((rule["gcp_service"], conf, note, product, usage_type))
             stats["review"] += 1
         elif mode == "ignore":
@@ -207,7 +266,8 @@ def main():
         )
 
     print(f"service_classifier: {stats['review']} review-routed, {stats['ignore']} ignored ($0), "
-          f"{stats['keep']} kept, {stats['unmatched']} unmatched product(s)")
+          f"{stats['keep']} kept, {stats['protected']} protected (deterministic mapper — rule skipped entirely), "
+          f"{stats['unmatched']} unmatched product(s)")
     sys.exit(0)
 
 

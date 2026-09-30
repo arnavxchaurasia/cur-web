@@ -30,6 +30,10 @@ import duckdb
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config_loader import load_data_config as _cfg
+try:
+    from aws_normalizer import canonical_service
+except Exception:  # pragma: no cover
+    canonical_service = lambda _p: None
 
 _svc_cfg = _cfg("service-classification")
 
@@ -79,6 +83,33 @@ def _has_instance_type(text: str | None) -> bool:
         return False
     return bool(re.search(r'\b(?:db\.|cache\.|kafka\.)?[a-z]\d[a-z0-9]*\.[a-z0-9]+\b', text, re.IGNORECASE))
 
+# Set once per job by main() before classify() is ever called (module-level,
+# same pattern as _FAMILY_RATE_CACHE-style caches elsewhere in this pipeline):
+# whether this bill has ANY line_item_type='DiscountedUsage' row anywhere.
+#
+# apply_commitment_ignores.py's whole justification for treating RIFee/
+# SavingsPlanRecurringFee/pricing_model=Reserved rows as ignorable is
+# "amortized costs already reflected in effective rates [of a companion
+# DiscountedUsage row]". Confirmed real on a live customer bill (job
+# 6a561187, 27 commitment_discount rows totaling $60,717.47 — RIFee for
+# AmazonRedshift $3,735.65 alone) that this bill has ZERO DiscountedUsage
+# rows anywhere: there is no companion row for these RIFee charges to be
+# "already reflected" in. The usage_type on these rows ("HeavyUsage:
+# ra3.4xlarge", "HeavyUsage:m5a.4xlarge", ...) and their total_usage
+# (1440.0 hrs = 2 nodes x 720 hrs/month, a real node-hours quantity, not a
+# discount-adjustment number) confirm these ARE the sole, real record of
+# Reserved-covered compute/DB usage on this bill — blanket-ignoring them
+# silently zeroed $60K+ of real spend in this one job, with it and its real
+# GCP-equivalent cost never appearing in the report at all. When the bill
+# genuinely has no DiscountedUsage rows, these rows must fall through to
+# their normal service-specific classification instead (compute_breakdown/
+# managed_db/redshift/etc. already correctly derive instance/node type from
+# usage_type regardless of the HeavyUsage/BoxUsage prefix — confirmed via
+# family_mapper.py's _resolve_instance_type(), which isn't anchored to any
+# specific prefix literal).
+_BILL_HAS_DISCOUNTED_USAGE = True  # safe default: preserves old behavior if unset
+
+
 RULES = [
     (
         # Negative-cost rows are credits, refunds, RI/SP negations — no GCP equivalent.
@@ -92,8 +123,24 @@ RULES = [
         # match service rules first and get incorrectly sent to the LLM for mapping.
         "commitment_discount",
         lambda r: (
-            r["line_item_type"] in ("RIFee", "SavingsPlanRecurringFee", "EdpDiscount")
-            or r["pricing_model"] in ("Reserved", "SavingsPlan")
+            (
+                _BILL_HAS_DISCOUNTED_USAGE
+                and (
+                    r["line_item_type"] in ("RIFee", "SavingsPlanRecurringFee")
+                    or r["pricing_model"] in ("Reserved", "SavingsPlan")
+                )
+            )
+            # EdpDiscount is always a pure rate-adjustment mechanism, never a
+            # usage-quantity carrier of its own — safe to ignore unconditionally
+            # (the near-universal negative-cost case is already caught earlier
+            # by the "negative_cost" rule above; a rare positive EdpDiscount
+            # row carries no instance/node-hours to price either way).
+            or r["line_item_type"] == "EdpDiscount"
+            # Synthetic commitment-summary products ("Savings Plans for Compute
+            # usage", "Compute Savings Plans", a distinct "Discounts" product)
+            # carry no per-service instance/node identity to price against a
+            # GCP SKU at all — genuinely unconditional, not gated on
+            # _BILL_HAS_DISCOUNTED_USAGE.
             or _ilike(r["product"], "Savings Plans")
             or _ilike(r["product"], "Discounts")
             or _ilike(r["product"], "CK Discounts")
@@ -186,7 +233,15 @@ RULES = [
                 or _ilike(r["product"], "Compute Cloud")
             )
             and (
-                _re(r.get("usage_type", ""), r"BoxUsage:t[234][ag]?\.")
+                # HeavyUsage: (alongside BoxUsage:) is AWS's own usage_type
+                # prefix for a Reserved Instance's recurring per-hour fee
+                # (RIFee line item). Without it, a Reserved t-family instance's
+                # HeavyUsage row skips this rule (correctly, since it needs
+                # E2/burstable treatment, not compute_breakdown's general-
+                # purpose family sweep) and falls through all the way to the
+                # generic compute_breakdown rule below — same bug class as
+                # the compute_breakdown HeavyUsage fix, just for burstable.
+                _re(r.get("usage_type", ""), r"(?:BoxUsage|HeavyUsage):t[234][ag]?\.")
                 # PDF/flat-CSV bills leave usage_type blank; fall back to the
                 # operation field which carries the instance type as a substring
                 # (e.g. "... t2.xlarge instance ...").
@@ -216,8 +271,13 @@ RULES = [
                 or _ilike(r["product"], "EC2")
                 or _ilike(r["product"], "Compute Cloud")
             )
-            # Graviton families all contain 'g' in the family name (t4g, c6g, m7g…)
-            and _re(r.get("usage_type", ""), r"BoxUsage:[a-z]\d[a-z0-9]*g[a-z0-9]*\.")
+            # Graviton families all contain 'g' in the family name (t4g, c6g, m7g…).
+            # HeavyUsage: (a Reserved Instance's recurring per-hour RIFee, alongside
+            # on-demand BoxUsage:) needs the same recognition here as the burstable
+            # rule above and compute_breakdown below, or a Reserved Graviton
+            # instance's fee row falls through to the general-purpose x86 family
+            # sweep instead of the correct C4A/N2D ARM path.
+            and _re(r.get("usage_type", ""), r"(?:BoxUsage|HeavyUsage):[a-z]\d[a-z0-9]*g[a-z0-9]*\.")
             # PDF/flat-CSV bills routinely leave pricing_unit/unit blank (this
             # gap is already documented and worked around elsewhere in this
             # file — managed_db, msk, block_storage) — without accepting "",
@@ -287,7 +347,18 @@ RULES = [
             # EC2 rows in one bill fell through to misc/LLM entirely because of
             # this. "per On Demand" is specific enough to only appear on a
             # genuine on-demand instance-hour line.
-            and (_re(r["usage_type"], r"BoxUsage|SpotUsage|ReservedInstances|running Linux")
+            # A fourth real phrasing: "HeavyUsage:<type>" — AWS's own usage_type
+            # for a Reserved Instance's recurring per-hour fee (RIFee line item;
+            # e.g. "APS3-HeavyUsage:m5a.4xlarge"). Only reachable at all once the
+            # bill genuinely has no DiscountedUsage rows to double-count against
+            # (see _BILL_HAS_DISCOUNTED_USAGE above) — in that case this usage_type
+            # is the SOLE record of real RI-covered compute-hours on the bill, and
+            # needs the exact same deterministic core+RAM pricing as an on-demand
+            # BoxUsage row, not misc/LLM. Confirmed real: $4,862.88 of EC2 RI
+            # HeavyUsage spend fell to misc purely because this phrasing wasn't
+            # recognized, even after fixing the classify_mechanics/commitment_
+            # discount routing that used to zero it out entirely.
+            and (_re(r["usage_type"], r"BoxUsage|SpotUsage|ReservedInstances|running Linux|HeavyUsage")
                  or _re(r["operation"], r"Instance[\s-]hour|hourly fee per Linux/UNIX|per On Demand \w+.*Instance"))
             # PDF/flat-CSV bills routinely leave pricing_unit/unit blank (this
             # gap is already documented and worked around elsewhere in this
@@ -297,6 +368,24 @@ RULES = [
             # rule feeds and fall through to the wrong classification entirely.
             and r["unit"] in ("Hrs", "hours", "")
         ),
+    ),
+    (
+        # RDS Extended Support (post-EOL engine-version surcharge, e.g.
+        # "ExtendedSupport:Yr1-Yr2:MySQL8.0") must come before managed_db/
+        # block_storage — its unit ("vCPU-hour") and product ("Amazon
+        # Relational Database Service") would otherwise match managed_db's
+        # generic RDS check and get routed to the LLM's instance-sizing path,
+        # or (if the unit doesn't look hourly enough) fall to block_storage's
+        # storage-SKU path — neither is correct for what is actually a flat
+        # per-vCPU surcharge with its own dedicated GCP pricing model.
+        # map_rds_extended_support() decides map-vs-ignore per engine version
+        # against the real Cloud SQL Extended Support SKU catalog (verified:
+        # GCP publishes "Cloud SQL for MySQL: ... Extended support vCPU"
+        # SKUs for MySQL 5.6/5.7 and PostgreSQL 9.6-13 in every region,
+        # including asia-south1 — but none for MySQL 8.0 as of this catalog
+        # snapshot, so 8.0 rows genuinely have no GCP charge to map to today).
+        "rds_extended_support",
+        lambda r: _re(r.get("usage_type", ""), r"ExtendedSupport:"),
     ),
     (
         # managed_db handles INSTANCE rows (billing unit = Hrs/hours) for the LLM.
@@ -318,16 +407,24 @@ RULES = [
             # ElastiCache excluded — has its own static elasticache handler below.
             # DiscountedUsage/SavingsPlanCoveredUsage rows are RI/SP-covered instance
             # hours — their pricing_unit can be NULL but they are still instance rows.
+            # Unit compared lowercase and includes the singular "ACU-Hr" (AWS's own
+            # Parquet/CUR-2.0 exports use the singular form; the plural "ACU-Hrs" came
+            # from CSV-format bills only) — confirmed real: a genuine Aurora Serverless
+            # v2 I/O-Optimized row ($6.8K/mo, unit="ACU-Hr") fell through this exact-match
+            # check to the block_storage catch-all below and got priced as GB-Mo storage
+            # instead of ACU compute capacity.
             and (
-                r.get("unit") in ("Hrs", "hours", "Hour", "hrs", "ACU-Hrs", "ACU-hours")
+                (r.get("unit") or "").lower() in ("hrs", "hours", "hour", "hr", "acu-hrs", "acu-hours", "acu-hr")
                 or r.get("line_item_type") in ("DiscountedUsage", "SavingsPlanCoveredUsage")
                 # PDF/flat-CSV bills leave pricing_unit blank. Catch InstanceUsage and
                 # RDS Proxy rows by usage_type pattern so they don't fall to block_storage
                 # where they'd be priced as $/GiBy.mo × hours (10-20x inflation).
                 or _re(r.get("usage_type", ""), r"InstanceUsage:|RDS:Proxy")
-                # Aurora Serverless V2 PDF rows: usage_type="APS5-Aurora:ServerlessV2Usage"
-                # has blank pricing_unit but is ACU billing — not GB storage.
-                or _re(r.get("usage_type", ""), r"Aurora:ServerlessV2Usage")
+                # Aurora Serverless V2 rows: usage_type="...Aurora:ServerlessV2Usage" (PDF)
+                # or "...Aurora:ServerlessV2IOOptimizedUsage" (I/O-Optimized storage mode,
+                # Parquet/CUR-2.0) — match the "Aurora:ServerlessV2" prefix alone (not the
+                # full "...Usage" suffix) so every variant is caught, not just the plain one.
+                or _re(r.get("usage_type", ""), r"Aurora:ServerlessV2")
             )
         ),
     ),
@@ -659,6 +756,37 @@ RULES = [
         ),
     ),
     (
+        # DynamoDB STORAGE rows only (TimedStorage-ByteHrs, TimedPITRStorage-
+        # ByteHrs) — a plain capacity charge with a real, directly comparable
+        # Firestore storage SKU (same GiB-mo unit, same free-tier shape), NOT
+        # workload-dependent like RCU/WCU throughput. The pricing matrix's
+        # documented "DynamoDB -> PASS, workload-dependent" call is specifically
+        # about read/write request units (Firestore/Bigtable charge per-
+        # operation, not per-provisioned-capacity — genuinely needs judgment
+        # on the customer's access pattern) — it was never meant to cover
+        # storage, which has no such ambiguity. RCU/WCU rows (usage_type
+        # ReadRequestUnits/WriteRequestUnits) deliberately fall through to
+        # misc/LLM unchanged, per that matrix design.
+        "dynamodb_storage",
+        lambda r: (
+            (_ilike(r["product"], "DynamoDB") or _ilike(r["product"], "AmazonDynamoDB"))
+            and _re(r.get("usage_type", ""), r"TimedStorage-ByteHrs|TimedPITRStorage-ByteHrs")
+        ),
+    ),
+    (
+        # AWS Shield Advanced's flat $3,000/mo subscription fee → Cloud Armor
+        # Enterprise's own Annual Subscription SKU (real, dynamically priced —
+        # see map_shield()). Scoped to the Monthly-Fee/Subscription row only,
+        # so it doesn't take the Shield-tagged data-transfer rows (a different
+        # usage_type) away from the data_transfer rule, which already prices
+        # those correctly as ordinary egress.
+        "shield",
+        lambda r: (
+            (_ilike(r["product"], "Shield") or _ilike(r["product"], "AWSShield"))
+            and _re(r.get("usage_type", ""), r"Monthly-?Fee")
+        ),
+    ),
+    (
         # QuickSight → Looker Studio Pro. Unlike GuardDuty/Inspector, QuickSight's
         # CUR usage_type strings directly encode role + edition (Author vs Reader,
         # Standard vs Enterprise/Pro) and the row quantity IS the per-user or
@@ -713,6 +841,36 @@ RULES = [
             _ilike(r["product"], "Elastic MapReduce")
             or _ilike(r["product"], "AmazonEMR")
             or _ilike(r["product"], "Amazon EMR")
+        ),
+    ),
+    (
+        # AWS Glue ETL/Crawler DPU-hours → Dataproc-style deterministic FORMULA
+        # mapping, same class as the EMR rule above. Only claims rows that
+        # actually carry a DPU-hour usage figure — per the pricing matrix's
+        # documented design, Glue rows with no DPU count in the CUR (Catalog-
+        # Storage, Catalog-Request — a different, non-compute charge shape)
+        # still fall through to misc/LLM, since there's nothing deterministic
+        # to convert there.
+        #
+        # Checked against BOTH pricing_unit AND usage_type, not pricing_unit
+        # alone — confirmed real in this exact bill: the genuine positive-cost
+        # ETL/Crawler DPU-hour row has pricing_unit="DPU-Hour", but AWS's own
+        # negation/credit entry for that identical usage_type
+        # ("APS3-ETL-DPU-Hour"/"APS3-Crawler-DPU-Hour") carries pricing_unit=
+        # "Hrs" instead — same class of unit-field inconsistency already
+        # worked around elsewhere in this file (RDS IOPS, Aurora Serverless
+        # PDF rows, WAF LCU). The negative row is harmless here (negative_cost
+        # claims it first, above), but it proves a positive-cost row with
+        # unit="Hrs" for this exact usage_type is a real shape AWS emits, not
+        # a hypothetical — so usage_type is checked as a fallback rather than
+        # trusting pricing_unit alone to always say "DPU-Hour".
+        "glue",
+        lambda r: (
+            (_ilike(r["product"], "Glue") or _ilike(r["product"], "AWSGlue"))
+            and (
+                _re(r.get("unit", ""), r"DPU-?Hour")
+                or _re(r.get("usage_type", ""), r"DPU-?Hour")
+            )
         ),
     ),
     (
@@ -812,8 +970,26 @@ RULES = [
         # falls through to misc instead, same as before this rule existed,
         # so this can't accidentally swallow an unclassified real AWS
         # service into an incorrect "no GCP equivalent" passthrough.
+        #
+        # The `\b` boundary check above is unreliable for a raw AWS
+        # ProductCode with no space between the "Amazon"/"AWS" prefix and the
+        # abbreviation that follows it (e.g. "AmazonVPC", "awskms" — both real,
+        # native AWS services, confirmed from a live customer bill): there is
+        # no word-boundary between two adjacent word characters regardless of
+        # case-folding, so the regex alone misreads them as third-party and
+        # routes real workload spend (VPC Endpoints, KMS keys) into a $0/
+        # "no GCP equivalent" bucket that should never apply to them. Before
+        # trusting the prefix regex, check canonical_service() (Layer 1,
+        # aws_normalizer.py) — its alias table already recognizes these exact
+        # raw codes ("amazonvpc"->"vpc", "awskms"->"kms", etc.) independent of
+        # spacing/casing, so a row it identifies as a real AWS service is
+        # never misrouted here even when the regex would have missed it.
         "marketplace_thirdparty",
-        lambda r: bool(r["product"]) and not re.match(r'^(amazon|aws)\b', r["product"], re.IGNORECASE),
+        lambda r: (
+            bool(r["product"])
+            and not re.match(r'^(amazon|aws)\b', r["product"], re.IGNORECASE)
+            and canonical_service(r["product"]) is None
+        ),
     ),
 ]
 
@@ -1076,6 +1252,18 @@ def main():
         "billing_format",
     ]
 
+    # --- Determine once, bill-wide, whether ignoring RIFee/SavingsPlanRecurringFee/
+    # Reserved-pricing rows is actually safe (see _BILL_HAS_DISCOUNTED_USAGE docstring
+    # above RULES) ---
+    global _BILL_HAS_DISCOUNTED_USAGE
+    _BILL_HAS_DISCOUNTED_USAGE = con.execute(
+        "SELECT count(*) FROM aws_li_catalog WHERE line_item_type = 'DiscountedUsage'"
+    ).fetchone()[0] > 0
+    if not _BILL_HAS_DISCOUNTED_USAGE:
+        print("classify_mechanics: no DiscountedUsage rows found in this bill — "
+              "RIFee/SavingsPlanRecurringFee/Reserved-pricing rows will be classified "
+              "and priced as real usage instead of ignored as commitment-discount noise.")
+
     # --- Classify ---
     updates: list[tuple[str, str]] = []
     misc_reasons: dict[str, str] = {}   # aws_li_key → why it landed in misc
@@ -1186,6 +1374,7 @@ def main():
         "flat_hourly", "object_storage", "per_request",
         "block_storage", "data_transfer", "non_workload", "cloudwatch",
         "guardduty", "inspector", "marketplace_thirdparty", "quicksight", "redshift", "athena", "kinesis", "efs", "xray", "fsx", "emr", "elasticache", "msk",
+        "rds_extended_support", "glue", "shield", "dynamodb_storage",
         # compute_windows/compute_arm/compute_burstable each have a dedicated static
         # handler in apply_static_mappings.py that always emits an output entry (map
         # or passthrough fallback) for every row — same shape as the other

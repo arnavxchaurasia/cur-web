@@ -1075,6 +1075,15 @@ def main():
     idx = 1
     for r in rows:
         product, operation, gcp_svc, strategy, notes, aws, od, cud1, cud3, aws_region, gcp_region, is_wl, pricing_model, instance_type, gcp_sku_name = r
+
+        # Negative rows (EDP reconciliation, refunds, "covered by Savings
+        # Plans" nettings, etc.) are rolled up into a single "Discounts &
+        # Credits" summary row below instead of being listed individually —
+        # aws_discounts (computed above as aws_gross - aws_grand) already
+        # carries their total, so per-row display here would just be noise.
+        if (aws or 0.0) < 0:
+            continue
+
         ptype  = pill_type(gcp_svc, product)
         p_html = pill_html(ptype)
 
@@ -1230,6 +1239,27 @@ def main():
             f"{diff_td}"
             f'<td class="extra-col">{desc_html}</td>'
             f"</tr>\n"
+        )
+        idx += 1
+
+    # discounts/credits summary row — every negative-cost row (EDP
+    # reconciliation, refunds, "covered by Savings Plans" nettings) collapsed
+    # into one line instead of being listed individually in the detail table.
+    if aws_discounts > 0.5:
+        detail_rows_html += (
+            f'<tr>'
+            f'<td style="color:#80868B;font-size:11px">{idx}</td>'
+            f'<td style="white-space:nowrap"><span style="font-size:12px">Discounts &amp; Credits</span></td>'
+            f'<td style="font-size:11px;min-width:180px;max-width:260px">—</td>'
+            f'<td style="font-size:11px;color:#5F6368;min-width:220px;max-width:320px">—</td>'
+            f'<td style="font-size:11px;color:#5F6368;white-space:nowrap">—</td>'
+            f'<td class="num">−{fmt(aws_discounts)}</td>'
+            f'<td class="num">—</td>'
+            f'<td class="num extra-col">—</td>'
+            f'<td class="num extra-col">—</td>'
+            f'<td class="num">—</td>'
+            f'<td class="extra-col"></td>'
+            f'</tr>\n'
         )
         idx += 1
 

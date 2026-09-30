@@ -49,7 +49,21 @@ _PDF_SUFFIX_RE = re.compile(
     r'Global|global|EU|US|AP|SA|ME|AF)\b.*$',
     re.IGNORECASE
 )
-_STRIP_PREFIX_RE = re.compile(r'^(amazon|aws)\s+', re.IGNORECASE)
+# \s* (not \s+): many real CUR bills give the product field as the compact
+# concatenated form ("AmazonSES", "AmazonSNS", "AmazonSQS", "AmazonECS",
+# "AmazonEKS", "AmazonMSK", "AmazonKMS", "AmazonEBS", ...) with no space after
+# the prefix at all. Requiring a space meant canonical_service() returned None
+# for every one of those — confirmed on a real bill where "AmazonSES" (product
+# field, verbatim) normalized to None, so the SES service_map rule never
+# matched and a $1,789 SES charge fell through to the generic "no GCP
+# equivalent" bucket. A few of these had been individually special-cased with
+# direct "amazonec2"/"amazons3"/"amazonrds"/"amazonvpc"/"awskms" alias entries,
+# but that's whack-a-mole — every other short AWS service code hits the same
+# gap until it's patched one at a time. Dropping the space requirement fixes
+# the general case: stripping "amazon"/"aws" from the START of the string
+# never touches text that doesn't begin with that literal prefix, so it can't
+# introduce false matches elsewhere (e.g. "licenses" doesn't start with "ses").
+_STRIP_PREFIX_RE = re.compile(r'^(amazon|aws)\s*', re.IGNORECASE)
 
 
 # Fallback substring matching must be longest-alias-first: "ec2" would otherwise

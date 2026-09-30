@@ -732,7 +732,38 @@ def main():
         sql = f"""
             WITH _raw_flat AS (
                 SELECT
-                    COALESCE({c(['lineitem/productcode', 'productcode'])}, '') as product,
+                    -- Prefer a human-readable name (e.g. "Amazon Simple Storage
+                    -- Service") over lineItem/ProductCode (AWS's short machine
+                    -- code, e.g. "AmazonS3"). Every downstream classifier
+                    -- (classify_mechanics.py, aws_normalizer.py, render_report.py's
+                    -- pill_type) matches on friendly-name substrings/word-
+                    -- boundaries ("Simple Storage", "\bS3\b", ...), which a bare
+                    -- code like "AmazonS3"/"AmazonRDS" never satisfies (no word
+                    -- boundary between the "n" of "Amazon" and the code that
+                    -- follows it once lowercased). Confirmed real: this silently
+                    -- sent every raw-CUR S3/RDS/EC2 row to misc -> passthrough
+                    -- instead of the deterministic static mappers.
+                    --
+                    -- Two shapes of friendly name exist across real bills:
+                    --   1. A flat product/ProductName column (some CUR exports).
+                    --   2. A bare `product` column holding the ENTIRE product
+                    --      struct as a JSON string (confirmed real on a live
+                    --      customer bill -- product_name nested inside product's
+                    --      JSON, e.g. Amazon Elastic File System, alongside
+                    --      storage_class/access_type -- with product_servicecode
+                    --      carrying the raw "AmazonEFS" code separately). Case 1
+                    --      never fires for this bill shape since no
+                    --      product/ProductName-style column exists at all --
+                    --      only the JSON-in-`product` form does.
+                    -- TRY() guards case 2 against a `product` column that isn't
+                    -- JSON (older/other bill formats) or is NULL/absent — both
+                    -- resolve to NULL and fall through to the code, same as before.
+                    COALESCE(
+                        NULLIF({c(['product/productname', 'productname'])}, ''),
+                        NULLIF(TRY(json_extract_string({c(['product'])}, '$.product_name')), ''),
+                        {c(['lineitem/productcode', 'productcode'])},
+                        ''
+                    ) as product,
                     COALESCE({c(['lineitem/usagetype', 'usagetype'])}, '') as usage_type,
                     COALESCE({c(['lineitem/operation', 'operation'])}, '') as operation,
                     COALESCE({c(['product/region', 'region'])}, '') as aws_region,

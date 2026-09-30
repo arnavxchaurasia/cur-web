@@ -173,10 +173,10 @@
     {
       "match": "shield",
       "category": "Security",
-      "gcp_service": "Cloud Armor",
-      "mode": "review",
-      "confidence": 72,
-      "reason": "Shield Standard is free on GCP (Cloud Armor standard). Shield Advanced ($3,000/mo flat) -> Cloud Armor Enterprise ($3,000/mo). Passthrough as pricing model is subscription, not per-unit."
+      "gcp_service": "Cloud Armor Enterprise",
+      "mode": "keep",
+      "confidence": 90,
+      "reason": "Shield Standard is free on GCP (Cloud Armor standard). Shield Advanced's flat $3,000/mo subscription -> Cloud Armor Enterprise Annual Subscription, priced dynamically by map_shield() (apply_static_mappings.py) against real catalog SKU EFB7-4299-A2EC ('Monthly Fee for Cloud Armor Enterprise Annual Subscription', service=Compute Engine, global, $3,000.00/mo flat -- exact list-price parity, both require a 1-year commitment tier). A prior version of this rule swept only the 'Networking'-service Cloud Armor Enterprise SKUs (Security Policy/Security Policy Rule/Requests -- all real but rate_usd=0.0, negotiated pricing) and wrongly concluded no priced SKU existed at all; the Annual Subscription base-fee SKU was missed because it lives under a different service (Compute Engine) in the catalog. mode=keep (not review) so this dynamic mapping isn't overwritten back to a flat passthrough stamp."
     },
     {
       "match": "cloudformation",
@@ -209,6 +209,14 @@
       "mode": "review",
       "confidence": 75,
       "reason": "EventBridge -> Pub/Sub or Eventarc; event routing pricing differs ($1/M events vs Pub/Sub throughput). Passthrough baseline."
+    },
+    {
+      "match": "securitybundle",
+      "category": "CDN/Security",
+      "gcp_service": "Cloud CDN + Cloud Armor Enterprise",
+      "mode": "review",
+      "confidence": 40,
+      "reason": "CloudFront Security Savings Bundle is a flat-rate commitment bundling CDN + Shield Advanced + WAF into one line item -- there is no per-component split in the CUR to map separately, and no dedicated mapper exists for this bundle SKU (unlike ordinary CloudFront bandwidth/request rows, which do map to real Cloud CDN SKUs elsewhere). Nearest GCP equivalent confirmed via the same live catalog sweep used elsewhere in this pipeline (resolve_sku()/find-sku.sh against catalog.duckdb): Cloud CDN (bandwidth, already mapped for plain CloudFront rows) + Cloud Armor Enterprise (security tier, same-or-better than Shield Advanced -- sku_id B8E8-47B2-8B51 'Security Policy' $/mo, global). NOT dynamically SKU-priced here: that Cloud Armor Enterprise SKU's bundled-catalog rate is $0.00 (contract/negotiated pricing, not published via the Billing Catalog API -- see the 'shield' rule above for the same finding), so wiring a real gcp_sku_id would silently zero out this row's spend instead of pricing it. Passthrough at AWS cost is the honest number until a component-level, contract-price-aware pricer exists."
     },
     {
       "match": "cloudfront",
@@ -339,7 +347,7 @@
       "reason": "AWS Transfer Family (SFTP/FTPS/FTP) has no managed GCP equivalent — options are Storage Transfer Service (batch), SFTP on GCE, or third-party. Passthrough with manual-review flag."
     },
     {
-      "match": "simple notification",
+      "match": "simple notification service",
       "category": "Messaging",
       "gcp_service": "Pub/Sub",
       "mode": "keep",
@@ -347,7 +355,7 @@
       "reason": "SNS -> Pub/Sub."
     },
     {
-      "match": "simple queue",
+      "match": "simple queue service",
       "category": "Messaging",
       "gcp_service": "Pub/Sub",
       "mode": "keep",
@@ -355,7 +363,7 @@
       "reason": "SQS -> Pub/Sub."
     },
     {
-      "match": "simple email",
+      "match": "simple email service",
       "category": "Email",
       "gcp_service": "Manual Review",
       "mode": "review",
