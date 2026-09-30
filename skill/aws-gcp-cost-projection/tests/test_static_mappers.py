@@ -663,6 +663,23 @@ def test_cloudwatch_custom_metrics_high_volume_not_silently_zeroed():
     assert out[0]["unit_multiplier"] == 1.0
 
 
+def test_cloudwatch_database_insights_ignored():
+    # Regression for job 6a561187 (row 153, $288.75): CloudWatch Database
+    # Insights (usage_type "CW:DatabaseInsights-vCPU-Hours") previously fell
+    # through to the generic "unit-incompatible passthrough" bucket. Cloud SQL
+    # Query Insights has no separate billable SKU anywhere in the GCP catalog
+    # — it's bundled into the base instance price — so this should resolve to
+    # a real $0, not a passthrough of the AWS-only per-vCPU-hour charge.
+    rows = [row(product="AmazonCloudWatch",
+                usage_type="APS3-CW:DatabaseInsights-vCPU-Hours",
+                operation="Aurora-MySQL:Provisioned", unit="vCPU-Hours",
+                total_usage=23100.0, aws_amortized_cost=288.75)]
+    out = _with_sku(map_cloudwatch, rows)
+    assert out[0]["strategy"] == "ignore"
+    assert out[0]["gcp_service"] == "Cloud Monitoring"
+    assert out[0]["unit_multiplier"] == 0.0
+
+
 # ---------------------------------------------------------------------------
 # EKS cluster-hours → GKE Zonal Cluster Management Fee
 # ---------------------------------------------------------------------------

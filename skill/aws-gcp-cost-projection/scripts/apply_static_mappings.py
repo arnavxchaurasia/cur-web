@@ -418,7 +418,21 @@ PER_REQUEST_MAP = [
     (r"SQS|Simple\s*Queue",    GCP_PUBSUB,         PUBSUB_MESSAGE_DELIVERY,              1.0),
     (r"SNS|Simple\s*Notification", GCP_PUBSUB,     PUBSUB_MESSAGE_DELIVERY,              1.0),
     (r"Kinesis",               GCP_PUBSUB,         PUBSUB_MESSAGE_DELIVERY,              1.0),
-    (r"ApiGateway|API Gateway","Cloud Endpoints", "API Gateway Requests",          1.0),
+    # Was "Cloud Endpoints" — swept the real catalog before writing this: "Cloud
+    # Endpoints" isn't even its own billed service in GCP's catalog at all (zero
+    # SKUs, zero service entry), so that label was never going to resolve to
+    # anything. GCP's actual direct product match is literally named "API
+    # Gateway" — but its own catalog entry has ONLY network-egress SKUs (23 of
+    # them, all GiBy-priced), no per-call/per-request SKU whatsoever — GCP's API
+    # Gateway genuinely doesn't charge per call the way AWS does; the request
+    # itself is free, cost comes from whatever backend (Cloud Run/Cloud
+    # Functions) it invokes. Apigee has real per-call pricing but was
+    # deliberately rejected as the mapping target: Apigee's pricing model is
+    # flat platform-tier + call-package based, not a simple $/million-requests
+    # rate, and came out ~5.7x off AWS's actual per-request cost when compared
+    # directly. So this stays passthrough either way — but the label is now the
+    # real matching product ("API Gateway"), not a non-existent placeholder.
+    (r"ApiGateway|API Gateway","API Gateway", "API Gateway Requests",          1.0),
     (r"StepFunctions|Step Functions",
                                "Workflows",       "Workflow Steps",                1.0),
     (r"EventBridge|EventBus",  "Eventarc",        "Eventarc Events",               1.0),
@@ -2266,6 +2280,43 @@ def map_per_request(rows):
             })
             continue
 
+        # AWS Backup per-resource backup-CREATION fee (e.g. "$0.11 per Namespace
+        # for Backup-Creation-EKS-Namespace") — a control-plane/orchestration fee
+        # charged per backup job actually run, independent of storage (that part
+        # is priced separately by map_block_storage's WarmStorage-ByteHrs
+        # handling). Swept the real GCP catalog before deciding this: "Backup for
+        # GKE" is the correct target service, but its pricing model is a FLAT
+        # $/month management fee PER PROTECTED CLUSTER (e.g. $10.35/mo in
+        # asia-south1), completely independent of how many backups are actually
+        # created — there is no per-backup-job SKU on the GCP side at all. AWS's
+        # per-event count (this row's total_usage, e.g. 2844 namespace-backups)
+        # can't be converted into "number of protected clusters" from this CUR
+        # row alone, so an honest passthrough with the correct GCP service name
+        # is the right call here — not a fabricated per-event rate.
+        if "backup" in product and "backup-creation" in (r.get("usage_type") or "").lower():
+            resource = (r.get("usage_type") or "").rsplit("-", 1)[-1]
+            out.append({
+                "aws_li_key":         r["aws_li_key"],
+                "gcp_service":        "Backup for GKE",
+                "gcp_sku_id":         None,
+                "gcp_sku_name":       None,
+                "component":          "requests",
+                "strategy":           "passthrough",
+                "unit_multiplier":    1.0,
+                "gcp_region":         gcp_region,
+                "projection_note":    (
+                    f"AWS Backup {resource} backup-creation fee (per-backup-event, "
+                    f"$/backup) → Backup for GKE bills a flat $/month management fee "
+                    f"PER PROTECTED CLUSTER instead (e.g. ~$10.35/mo in asia-south1), "
+                    f"independent of how many backups run — fundamentally different "
+                    f"billing unit (per-event vs. flat-per-cluster); this row's event "
+                    f"count can't be converted to a cluster count without more context, "
+                    f"so passthrough at AWS cost is the honest choice here"
+                ),
+                "mapping_confidence": 0.45,
+            })
+            continue
+
         # Fargate vCPU-Hours / GB-Hours → GKE Autopilot pod resources.
         # Fargate is per-task (vCPU + memory billed separately). GKE Autopilot is the
         # closest equivalent: per-pod mCPU-hour + GiBy.h (no cluster management fee).
@@ -2725,6 +2776,24 @@ def map_per_request(rows):
                                  "fixed enrollment cost ($200-3000/mo) not modeled here; verify actual "
                                  "tier requirements with customer before finalizing]")
                         confidence = 0.5
+                elif service == "API Gateway":
+                    # GCP's own "API Gateway" product is the correct direct match
+                    # (not Apigee — rejected, ~5.7x off on pricing model; not
+                    # "Cloud Endpoints" — not even a real billed catalog service).
+                    # But API Gateway's own catalog entry has no per-call SKU at
+                    # all — only network-egress SKUs — meaning GCP genuinely
+                    # doesn't charge per request the way AWS does here.
+                    note = (
+                        "AWS API Gateway per-request charge → GCP API Gateway (the real, direct "
+                        "product match — not Apigee, whose flat platform-tier + call-package pricing "
+                        "came out ~5.7x off AWS's per-request cost when compared; not \"Cloud "
+                        "Endpoints\", which isn't a separately billed GCP service at all). GCP's API "
+                        "Gateway itself has no per-call charge in the catalog (only network-egress "
+                        "SKUs) — the request layer is free; cost comes from whichever backend "
+                        "(Cloud Run/Cloud Functions) it invokes. Passthrough at AWS cost as the "
+                        "honest baseline until that backend cost is separately modeled"
+                    )
+                    confidence = 0.55
             else:
                 # No known GCP equivalent — passthrough at cost parity rather than
                 # silently mapping to Cloud Run (which would be wrong for most unmatched
@@ -3757,6 +3826,45 @@ def map_dynamodb_storage(rows):
     return out
 
 
+# MWAA -> Cloud Composer. Swept the real catalog before writing this: Cloud
+# Composer has real, priced SKUs (vCPU-hour, SQL vCPU-hour for the metadata
+# DB, storage GiB-month, network egress GiB — all region-specific, e.g.
+# $0.088/vCPU-hr in asia-south1). But MWAA bills per Environment-class and
+# Worker-class FLAT hourly rate (mw1.micro/small/medium/large), not raw vCPU-
+# hours — converting requires AWS's own published vCPU/RAM-per-class spec,
+# which (unlike Glue's "1 DPU = 4 vCPU + 16 GiB" or MSK's "1 MCU = 1 vCPU +
+# 4 GiB") isn't a single number I could verify against anything in this
+# offline environment. Honest passthrough with the correct target service,
+# not a guessed conversion table.
+def map_mwaa(rows):
+    out = []
+    for r in rows:
+        gcp_region = r.get("gcp_region")
+        ut = r.get("usage_type") or ""
+        component = "worker" if "worker" in ut.lower() else "environment"
+        out.append({
+            "aws_li_key":         r["aws_li_key"],
+            "gcp_service":        "Cloud Composer",
+            "gcp_sku_id":         None,
+            "gcp_sku_name":       None,
+            "component":          component,
+            "strategy":           "passthrough",
+            "unit_multiplier":    1.0,
+            "gcp_region":         gcp_region,
+            "projection_note":    (
+                f"MWAA ({ut}) → Cloud Composer, GCP's own managed-Airflow service (a real "
+                f"1:1 product match). Cloud Composer bills by raw vCPU-hour/GiB-hour/storage "
+                f"(e.g. $0.088/vCPU-hr in this region) rather than MWAA's Environment/Worker "
+                f"class-hourly rate, so converting this row needs AWS's published vCPU/RAM "
+                f"spec for this environment/worker class — verify with the customer or AWS's "
+                f"MWAA docs before finalizing a sized Composer environment; passthrough at "
+                f"AWS cost until then"
+            ),
+            "mapping_confidence": 0.45,
+        })
+    return out
+
+
 def map_inspector(rows):
     """Amazon Inspector → Security Command Center Premium passthrough.
 
@@ -3890,7 +3998,23 @@ def map_quicksight(rows):
                                        "NLQ equivalent; passthrough at cost parity"),
                 "mapping_confidence": 0.55,
             })
-        elif re.search(r"author", blob):
+        elif (
+            re.search(r"author", blob)
+            # AWS also bills named-user QuickSight seats under a phrasing that
+            # never says "author" at all — confirmed real on a live customer
+            # bill: usage_type "QS-User-Enterprise-Month" (no "Author"
+            # substring), total_usage=19.82 (~20 named users), aws cost
+            # $475.70 -> effective rate $24.00/user/mo exactly. The "-Month"
+            # suffix on a "User" (not "Session"/"Reader") usage_type is the
+            # same per-named-user-per-month billing shape this branch already
+            # depends on for Author rows (CUR quantity = seat-months), just a
+            # different AWS phrasing for the same named-user subscription —
+            # not a Reader (pay-per-session) charge, which AWS always phrases
+            # with "Session"/"Reader" explicitly, never "-Month". Excluding
+            # "session"/"reader" here keeps this from ever double-matching
+            # what the elif below already owns.
+            or (re.search(r"user.*-?month\b", blob) and not re.search(r"session|reader", blob))
+        ):
             out.append({
                 "aws_li_key":         r["aws_li_key"],
                 "gcp_service":        "Looker Studio Pro",
@@ -3901,9 +4025,9 @@ def map_quicksight(rows):
                 "strategy":           "map",
                 "unit_multiplier":    1.0,
                 "gcp_region":         gcp_region,
-                "projection_note":    (f"QuickSight Author seat → Looker Studio Pro at "
+                "projection_note":    (f"QuickSight Author/named-user seat → Looker Studio Pro at "
                                        f"${GCP_LOOKER_STUDIO_PRO_RATE:.0f}/user/mo (published list price; "
-                                       f"CUR quantity for Author usage types is the per-user-month seat count)"),
+                                       f"CUR quantity for Author/named-user usage types is the per-user-month seat count)"),
                 "mapping_confidence": 0.80,
             })
         elif re.search(r"reader|session", blob):
@@ -4815,6 +4939,20 @@ def map_cloudwatch(rows):
         # signal only in `operation`/`product`, same as Alarms/Dashboards.
         is_api_requests = bool(re.search(r"per\s*1,?000\s*requests?", op, re.IGNORECASE))
 
+        # CloudWatch Database Insights (usage_type "CW:DatabaseInsights-vCPU-
+        # Hours", e.g. "Aurora-MySQL:Provisioned"): AWS bills this per vCPU-
+        # hour of the monitored DB instance ($0.0125/vCPU-hr observed). GCP's
+        # equivalent capability — Cloud SQL Query Insights — has no matching
+        # billable SKU anywhere in the catalog (confirmed by sweeping every
+        # Cloud SQL SKU whose description mentions query/diagnostics/
+        # performance/monitoring — the only hits are ordinary compute-tier
+        # vCPU SKUs, not a separate insights surcharge); it's bundled into the
+        # base instance price at $0 extra. Unlike custom metrics above, this
+        # doesn't depend on unknowable ingestion volume — it's a flat, fully-
+        # disclosed per-vCPU-hour AWS-only charge with a confirmed-free GCP
+        # counterpart, so $0 here isn't a hedge, it's the real answer.
+        is_db_insights = "databaseinsights" in dash_blob.replace(" ", "").replace("-", "")
+
         # CloudWatch custom metrics (billed AWS-side per metric-month): GCP
         # Cloud Monitoring bills custom-metric ingestion by INGESTED VOLUME
         # (MiB/month), not per-metric-count, with the first 150 MiB/project/
@@ -5014,6 +5152,27 @@ def map_cloudwatch(rows):
                 "gcp_region":         gcp_region,
                 "projection_note":    "CloudWatch DashboardHour → $0 on GCP (Cloud Monitoring includes dashboards free)",
                 "mapping_confidence": 0.95,
+            }
+            out.append(entry)
+            continue
+        elif is_db_insights:
+            # Cloud SQL Query Insights carries no separate per-vCPU-hour SKU —
+            # it's included in the base instance price; $0 on GCP.
+            entry = {
+                "aws_li_key":         r["aws_li_key"],
+                "gcp_service":        "Cloud Monitoring",
+                "gcp_sku_id":         None,
+                "gcp_sku_name":       None,
+                "component":          "db-insights",
+                "strategy":           "ignore",
+                "unit_multiplier":    0.0,
+                "gcp_region":         gcp_region,
+                "projection_note":    (
+                    "CloudWatch Database Insights (per-vCPU-hour AWS charge) → $0 on GCP: "
+                    "Cloud SQL Query Insights is bundled into the base instance price with no "
+                    "separate billable SKU (verified against the full GCP SKU catalog)"
+                ),
+                "mapping_confidence": 0.90,
             }
             out.append(entry)
             continue
@@ -6814,7 +6973,7 @@ def main():
               ('flat_hourly', 'object_storage', 'per_request', 'block_storage', 'data_transfer',
                'non_workload', 'cloudwatch', 'guardduty', 'inspector', 'marketplace_thirdparty', 'quicksight', 'redshift', 'athena', 'kinesis', 'efs',
                'xray', 'fsx', 'emr', 'elasticache', 'msk', 'compute_windows', 'compute_arm',
-               'compute_burstable', 'managed_db', 'opensearch', 'commitment_discount', 'rds_extended_support', 'glue', 'shield', 'dynamodb_storage')
+               'compute_burstable', 'managed_db', 'opensearch', 'commitment_discount', 'rds_extended_support', 'glue', 'shield', 'dynamodb_storage', 'mwaa')
     """).fetchall()
     con.close()
 
@@ -6827,7 +6986,7 @@ def main():
                                   "block_storage", "data_transfer", "non_workload", "cloudwatch", "msk",
                                   "guardduty", "inspector", "marketplace_thirdparty", "quicksight", "redshift", "athena", "kinesis", "efs", "xray",
                                   "fsx", "emr", "elasticache", "compute_windows", "compute_arm",
-                                  "compute_burstable", "managed_db", "opensearch", "commitment_discount", "rds_extended_support", "glue", "shield", "dynamodb_storage")}
+                                  "compute_burstable", "managed_db", "opensearch", "commitment_discount", "rds_extended_support", "glue", "shield", "dynamodb_storage", "mwaa")}
     for raw in rows:
         r = dict(zip(cols, raw))
         by_group[r["mechanic_group"]].append(r)
@@ -6866,6 +7025,7 @@ def main():
         "glue":                 map_glue,
         "shield":               map_shield,
         "dynamodb_storage":     map_dynamodb_storage,
+        "mwaa":                 map_mwaa,
     }
     all_llm_rows: list[dict] = []
 

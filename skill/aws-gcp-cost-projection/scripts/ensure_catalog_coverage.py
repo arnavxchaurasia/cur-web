@@ -11,7 +11,10 @@ For every (gcp_service, gcp_region, gcp_sku_name) row needed by this job:
 
 Runs before apply_rates.py so the rate-loader always finds what it needs.
 
-Auth: uses GOOGLE_CLOUD_API_KEY env var, or falls back to `gcloud auth print-access-token`.
+Auth: uses GOOGLE_CLOUD_API_KEY/GCP_API_KEY env var. The `gcloud auth
+print-access-token` fallback is opt-in only via AGY_ALLOW_GCLOUD_LIVE_FETCH=1
+-- it can hang indefinitely on Windows even with an active gcloud session
+(confirmed real), so it is never attempted automatically.
 No credentials → audit-only mode (logs gaps, no catalog update).
 """
 
@@ -92,12 +95,36 @@ def _mappable_pattern_clause(column):
 # ---------------------------------------------------------------------------
 
 def _gcp_token():
+    """Return (kind, value) auth token, or None.
+
+    CONFIRMED REAL BUG: the `gcloud` fallback below used to run
+    unconditionally, on every job, with no timeout at all on the subprocess
+    call. Reproduced directly on this Windows machine: `gcloud auth
+    print-access-token` hung past 120s even with a valid, already-active
+    `gcloud auth` session — `gcloud.cmd` is a batch shim that spawns its own
+    child process, and that grandchild can keep the pipe open past whatever
+    timeout the parent subprocess call requests, so even a `timeout=` kwarg
+    here would not reliably bound it (same class of bug apply_static_
+    mappings.py's own `_gcp_token_uncached()` already documents and works
+    around). A live job that hit this for even one missing SKU could stall
+    indefinitely. Fixed the same way: opt-in only via
+    AGY_ALLOW_GCLOUD_LIVE_FETCH=1, not attempted by default. The plain
+    GOOGLE_CLOUD_API_KEY/GCP_API_KEY path (an HTTP call with a real bounded
+    timeout, no subprocess) remains the safe way to opt into live lookups.
+    """
     key = os.environ.get("GOOGLE_CLOUD_API_KEY") or os.environ.get("GCP_API_KEY")
     if key:
         return ("key", key)
+    if os.environ.get("AGY_ALLOW_GCLOUD_LIVE_FETCH") != "1":
+        return None
+    import shutil
+    gcloud_bin = shutil.which("gcloud")
+    if not gcloud_bin:
+        return None
     try:
         tok = subprocess.check_output(
-            ["gcloud", "auth", "print-access-token"], text=True, stderr=subprocess.DEVNULL
+            [gcloud_bin, "auth", "print-access-token"], text=True, stderr=subprocess.DEVNULL,
+            timeout=10,
         ).strip()
         if tok:
             return ("bearer", tok)

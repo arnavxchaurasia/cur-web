@@ -72,6 +72,22 @@ func runCatalogRefreshIfStale() {
 	runCatalogRefreshNow()
 }
 
+// catalogRefreshTimeout bounds runCatalogRefreshNow's subprocess.
+//
+// CONFIRMED REAL BUG this guards against: catalog_health_check.py's own
+// `gcloud auth print-access-token` fallback can hang indefinitely on
+// Windows even with an active, valid gcloud session (gcloud.cmd spawns a
+// child process that can keep stdout/stderr pipes open past any timeout the
+// Python subprocess call itself requests) -- confirmed by reproducing it
+// directly. That script now gates the gcloud path behind
+// AGY_ALLOW_GCLOUD_LIVE_FETCH=1 so it is off by default, but cmd.Run() here
+// had NO bound at all at the Go layer either: if that env var (or some
+// future change) ever re-enabled a hang-prone path, this goroutine -- which
+// runs on every server startup and every 24h tick -- would block forever
+// and leak a zombie python/gcloud process each time. A context timeout at
+// this layer is defense in depth independent of whatever the script does.
+const catalogRefreshTimeout = 2 * time.Minute
+
 // runCatalogRefreshNow runs the health-check/refresh script unconditionally,
 // ignoring catalogStaleDays. Used by the forced "refresh now" admin action.
 func runCatalogRefreshNow() {
@@ -89,13 +105,20 @@ func runCatalogRefreshNow() {
 		python = "python"
 	}
 
-	cmd := exec.Command(python, script, "--refresh", "--skill-dir", skillDir)
+	ctx, cancel := context.WithTimeout(context.Background(), catalogRefreshTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, python, script, "--refresh", "--skill-dir", skillDir)
 	cmd.Dir = skillDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
-		slog.Warn("catalog refresh finished with error", "err", err)
+		if ctx.Err() == context.DeadlineExceeded {
+			slog.Warn("catalog refresh timed out, killed subprocess", "timeout", catalogRefreshTimeout)
+		} else {
+			slog.Warn("catalog refresh finished with error", "err", err)
+		}
 	} else {
 		slog.Info("GCP catalog refresh complete")
 	}

@@ -29,6 +29,8 @@
     "fsx":                                  "fsx",
     "amazonfsx":                            "fsx",
     "backup":                               "backup",
+    "transfer family":                      "transferfamily",
+    "awstransfer":                          "transferfamily",
     "relational database service":         "rds",
     "rds":                                  "rds",
     "amazonrds":                            "rds",

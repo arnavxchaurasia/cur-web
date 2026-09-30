@@ -10,7 +10,11 @@ Usage:
 
 Options:
     --refresh    Fetch missing/stale SKU files from the GCP Cloud Billing API
-                 (requires GOOGLE_CLOUD_API_KEY env var or `gcloud auth login`)
+                 (requires GOOGLE_CLOUD_API_KEY/GCP_API_KEY env var; the
+                 `gcloud auth print-access-token` fallback is opt-in only via
+                 AGY_ALLOW_GCLOUD_LIVE_FETCH=1 -- it can hang indefinitely on
+                 Windows even with an active gcloud session, confirmed real,
+                 so it is never attempted automatically)
     --skill-dir  Path to the skill root (default: parent of this script's dir)
 
 Exit codes:
@@ -23,6 +27,7 @@ import argparse
 import gzip
 import json
 import os
+import shutil
 import subprocess
 import sys
 import urllib.parse
@@ -41,14 +46,38 @@ STALE_DAYS = 7
 # ---------------------------------------------------------------------------
 
 def _gcp_token():
+    """Return (kind, value) auth token, or None.
+
+    CONFIRMED REAL BUG: the `gcloud` fallback below used to run
+    unconditionally with no timeout on the subprocess call at all — and this
+    function is invoked by internal/jobs/catalog_refresher.go's background
+    refresher (server startup + every 24h) via `cmd.Run()`, which ALSO has no
+    timeout/context at the Go level. Reproduced directly on Windows: `gcloud
+    auth print-access-token` hung past 120s even with a valid, already-active
+    `gcloud auth` session (`gcloud.cmd` is a batch shim whose spawned child
+    process can keep the pipe open past whatever timeout the parent
+    subprocess call requests, so a bare `timeout=` kwarg alone would not
+    reliably bound it either — same bug class apply_static_mappings.py's own
+    `_gcp_token_uncached()` already documents and works around there). With
+    no bound at either layer, this could hang the catalog-refresh goroutine
+    (and leak a zombie subprocess) indefinitely on every periodic tick.
+    Fixed the same way: opt-in only via AGY_ALLOW_GCLOUD_LIVE_FETCH=1, not
+    attempted by default; GOOGLE_CLOUD_API_KEY/GCP_API_KEY (a plain HTTP call
+    with a real bounded timeout, no subprocess) remains the safe default path.
+    """
     key = os.environ.get("GOOGLE_CLOUD_API_KEY") or os.environ.get("GCP_API_KEY")
     if key:
         return ("key", key)
+    if os.environ.get("AGY_ALLOW_GCLOUD_LIVE_FETCH") != "1":
+        return None
     for candidate in ["gcloud", r"C:\Users\Public\google-cloud-sdk\bin\gcloud.cmd"]:
+        resolved = shutil.which(candidate) or (candidate if os.path.exists(candidate) else None)
+        if not resolved:
+            continue
         try:
             tok = subprocess.check_output(
-                [candidate, "auth", "print-access-token"],
-                text=True, stderr=subprocess.DEVNULL
+                [resolved, "auth", "print-access-token"],
+                text=True, stderr=subprocess.DEVNULL, timeout=10,
             ).strip()
             if tok:
                 return ("bearer", tok)

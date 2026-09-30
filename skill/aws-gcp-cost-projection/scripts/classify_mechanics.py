@@ -772,6 +772,26 @@ RULES = [
         ),
     ),
     (
+        # MWAA (Managed Workflows for Apache Airflow) → Cloud Composer, GCP's
+        # own managed-Airflow service — a genuine 1:1 product match, unlike
+        # most "no equivalent" passthrough cases. Kept passthrough for now
+        # (not a formula mapper like Glue/MSK) because AWS bills per
+        # Environment-class and Worker-class hourly rate (mw1.micro/small/
+        # medium/large), while Cloud Composer bills per raw vCPU-hour + GiB-
+        # hour + storage — converting the two requires AWS's own published
+        # vCPU/RAM-per-class spec table, which isn't independently verifiable
+        # from this offline catalog the way Glue's DPU spec or MSK's MCU spec
+        # were (both AWS-documented, single well-known numbers). See
+        # map_mwaa() for the honest-passthrough note instead of a guessed
+        # conversion table.
+        "mwaa",
+        lambda r: (
+            _ilike(r["product"], "Managed Workflows for Apache Airflow")
+            or _ilike(r["product"], "AmazonMWAA")
+            or _ilike(r["product"], "MWAA")
+        ),
+    ),
+    (
         # DynamoDB STORAGE rows only (TimedStorage-ByteHrs, TimedPITRStorage-
         # ByteHrs) — a plain capacity charge with a real, directly comparable
         # Firestore storage SKU (same GiB-mo unit, same free-tier shape), NOT
@@ -1390,7 +1410,7 @@ def main():
         "flat_hourly", "object_storage", "per_request",
         "block_storage", "data_transfer", "non_workload", "cloudwatch",
         "guardduty", "inspector", "marketplace_thirdparty", "quicksight", "redshift", "athena", "kinesis", "efs", "xray", "fsx", "emr", "elasticache", "msk",
-        "rds_extended_support", "glue", "shield", "dynamodb_storage",
+        "rds_extended_support", "glue", "shield", "dynamodb_storage", "mwaa",
         # compute_windows/compute_arm/compute_burstable each have a dedicated static
         # handler in apply_static_mappings.py that always emits an output entry (map
         # or passthrough fallback) for every row — same shape as the other

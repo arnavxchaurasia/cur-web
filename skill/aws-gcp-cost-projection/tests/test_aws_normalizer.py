@@ -95,7 +95,17 @@ def test_dms_rule_matches_and_is_not_marketplace_thirdparty():
     ), "DMS row would still be misclassified as marketplace_thirdparty"
 
     dms_rule = next(r for r in _rules() if r["match"] == "database migration")
-    assert _rule_matches(dms_rule, product, "APS3-InstanceUsg:dms.r5.2xlarge", cs_product, {})
+    # Covers every DMS replication-instance size seen on job 6a561187 (r5.2xlarge
+    # $945.00, r5.xlarge $262.35, r6i.xlarge $262.35) — the fix is keyed on the
+    # product name, not the instance type, so all sizes must resolve alike.
+    for usage_type in (
+        "APS3-InstanceUsg:dms.r5.2xlarge",
+        "APS3-InstanceUsg:dms.r5.xlarge",
+        "APS3-InstanceUsg:dms.r6i.xlarge",
+        "APS3-InstanceUsg:dms.t3.large",
+        "APS3-InstanceUsg:dms.t3.medium",
+    ):
+        assert _rule_matches(dms_rule, product, usage_type, cs_product, {}), usage_type
 
 
 def test_sagemaker_product_name_recognized_as_native_aws_service():
