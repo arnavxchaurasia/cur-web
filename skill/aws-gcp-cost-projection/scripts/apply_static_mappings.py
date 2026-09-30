@@ -4071,7 +4071,7 @@ def map_rds_extended_support(rows: list[dict]) -> list[dict]:
             )
             out.append({
                 "aws_li_key":         r["aws_li_key"],
-                "gcp_service":        "N/A (no GCP Extended Support SKU for this version)",
+                "gcp_service":        GCP_CLOUD_SQL,
                 "gcp_sku_id":         None,
                 "gcp_sku_name":       None,
                 "component":          "extended-support",
@@ -5747,6 +5747,15 @@ _MSK_VCPU_RAM: dict[str, tuple[int, float]] = {
     "r5.4xlarge": (16,128.0), "r5.8xlarge": (32,256.0),
     "r7g.large":  (2, 16.0),  "r7g.xlarge": (4, 32.0),  "r7g.2xlarge":(8, 64.0),
     "r7g.4xlarge":(16,128.0), "r7g.8xlarge":(32,256.0),
+    # MSK Connect (usage_type "Kafka.mcu.general", operation "RunConnect") is a
+    # different sub-service from the broker fleet above — it bills per "MCU"
+    # (MSK Connect Unit), AWS's own abstraction, not an EC2 instance family.
+    # 1 MCU = 1 vCPU + 4 GiB memory (AWS's published MSK Connect worker spec —
+    # same class of per-unit conversion as Glue's 1 DPU = 4 vCPU + 16 GiB).
+    # Without this entry, "mcu.general" never matched any EC2 family shape, so
+    # every MSK Connect row silently fell to the "instance type not in table"
+    # passthrough fallback below — confirmed real: this specific row.
+    "mcu.general": (1, 4.0),
 }
 
 # Region prefix embedded in AWS usage_type (e.g. "APS5-Kafka.t3.small") → GCP region.
@@ -5759,8 +5768,53 @@ _MSK_VCPU_RAM: dict[str, tuple[int, float]] = {
 from region_prefix import UT_PREFIX_TO_GCP as _UT_PREFIX_TO_GCP, UT_PREFIX_RE as _UT_PREFIX_RE
 _MSK_UT_PREFIX_TO_GCP = _UT_PREFIX_TO_GCP  # backward-compat alias
 
-_MSK_UT_INSTANCE_RE = re.compile(r"Kafka\.([a-z][0-9a-z]+\.[0-9]*x?(?:small|medium|large))", re.IGNORECASE)
+# "general" (added alongside small/medium/large) catches MSK Connect's
+# "Kafka.mcu.general" usage_type — its size suffix isn't an EC2 T-shirt size,
+# but the same family.size shape otherwise, so extending the one regex is
+# simpler and safer than adding a parallel one that could drift out of sync.
+_MSK_UT_INSTANCE_RE = re.compile(r"Kafka\.([a-z][0-9a-z]+\.[0-9]*x?(?:small|medium|large|general))", re.IGNORECASE)
 _MSK_UT_PREFIX_RE   = _UT_PREFIX_RE  # same regex, kept for backward compat
+
+# Regions known to be geographically close to a given region — consulted ONLY
+# for the "no ARM family available in this region" architecture-review
+# disclosure note below, never to silently switch the priced region. A real
+# job (asia-south2/Delhi, m7g.2xlarge) confirmed GCP genuinely has no C4A/T2A
+# ARM family in Delhi (checked directly against the live billing catalog:
+# zero Arm/C4A/T2A SKUs list asia-south2 in service_regions, while N4 x86 has
+# a full rate there) — that part of the existing passthrough decision is
+# correct, not a bug. But the note only said "confirm ... whether a different
+# region is acceptable" without naming one, even though C4A Arm IS available
+# in asia-south1 (Mumbai) — the SAME region this bill's every other resource
+# is already priced against. Naming a concrete, real nearby option is more
+# useful than a generic hand-wave. Curated, not exhaustive; a region absent
+# from this map simply gets no extra hint, same behavior as before this existed.
+_NEARBY_REGION_HINTS = {
+    "asia-south2": ["asia-south1"],   # Delhi -> Mumbai
+}
+
+
+def _nearby_arm_hint(region, vcpu, ram_gib, arm_default, tiers, workloads):
+    """For the ARM-unavailable disclosure note only: check a short curated
+    list of geographically nearby regions for a real, priced ARM family, and
+    return (hint_region, family_label, hourly_cost) for the first one found,
+    or None. Never used to switch the row's own priced region — purely an
+    informational addition to the existing passthrough note."""
+    for hint_region in _NEARBY_REGION_HINTS.get(region, []):
+        label, cpu_desc, ram_desc, _, _ = cheapest_in_scope(
+            arm_default, vcpu, ram_gib, hint_region, archs=("arm",), tiers=tiers,
+            workloads=workloads)
+        if not (cpu_desc and ram_desc):
+            continue
+        cpu_sku = _strict_resolve_sku(GCP_COMPUTE_ENGINE, cpu_desc, hint_region)
+        ram_sku = _strict_resolve_sku(GCP_COMPUTE_ENGINE, ram_desc, hint_region)
+        if not (cpu_sku and ram_sku):
+            continue
+        cpu_rate = _family_hourly_rate(GCP_COMPUTE_ENGINE, cpu_desc, hint_region)
+        ram_rate = _family_hourly_rate(GCP_COMPUTE_ENGINE, ram_desc, hint_region)
+        if cpu_rate is None or ram_rate is None:
+            continue
+        return hint_region, label, vcpu * cpu_rate + ram_gib * ram_rate
+    return None
 
 
 def map_msk(rows: list) -> list:
@@ -5872,6 +5926,11 @@ def map_msk(rows: list) -> list:
                                 "switched automatically since Graviton/ARM binaries aren't x86-compatible "
                                 "without a rebuild; confirm with customer whether x86 is viable, or "
                                 "whether a different region is acceptable]")
+                    hint = _nearby_arm_hint(region, vcpu, ram_gib, arm_default, arm_tiers, _arm_workloads())
+                    if hint:
+                        hint_region, hint_label, hint_cost = hint
+                        cost_tag = cost_tag[:-1] + (f"; {hint_label} IS available in nearby {hint_region} "
+                                                     f"at ~${hint_cost:.4f}/hr if migrating region is acceptable]")
 
             if found_arm:
                 x86_label, x86_core, x86_ram, _, _ = cheapest_in_scope(
@@ -5924,7 +5983,8 @@ def map_msk(rows: list) -> list:
                 "strategy":           strategy,
                 "unit_multiplier":    mult,
                 "gcp_region":         region or r.get("gcp_region"),
-                "projection_note":    (f"MSK {itype} broker → GCE self-hosted Kafka; "
+                "projection_note":    (f"MSK {itype} {'Connect worker' if itype.startswith('mcu.') else 'broker'} "
+                                       f"→ GCE self-hosted Kafka{' Connect' if itype.startswith('mcu.') else ''}; "
                                        f"{vcpu} vCPU / {ram_gib} GiB RAM; "
                                        f"component={comp}{cost_tag}"),
                 "mapping_confidence": 0.72,
@@ -6426,6 +6486,11 @@ def map_compute_arm(rows: list[dict]) -> list[dict]:
                                 "switched automatically since Graviton/ARM binaries aren't x86-compatible "
                                 "without a rebuild; confirm with customer whether x86 is viable, or "
                                 "whether a different region is acceptable]")
+                    hint = _nearby_arm_hint(region, vcpu, ram_gib, "C4A Arm", ("sustained",), _arm_workloads())
+                    if hint:
+                        hint_region, hint_label, hint_cost = hint
+                        cost_tag = cost_tag[:-1] + (f"; {hint_label} IS available in nearby {hint_region} "
+                                                     f"at ~${hint_cost:.4f}/hr if migrating region is acceptable]")
 
             # Disclose (never silently switch) a cheaper x86 alternative when a
             # real ARM SKU WAS found above — mirrors the disclosure already

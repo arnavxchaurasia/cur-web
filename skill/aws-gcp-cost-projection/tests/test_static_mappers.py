@@ -305,6 +305,25 @@ def test_arm_ec2_unparseable_passthrough():
     assert out[0]["strategy"] == "passthrough"
 
 
+def test_arm_ec2_delhi_no_arm_names_nearby_mumbai_alternative():
+    # Real job case (asia-south2/Delhi, m7g.2xlarge, $690.90): GCP genuinely
+    # has no C4A/T2A ARM family in Delhi (confirmed against the live billing
+    # catalog), so passthrough here is correct, not a bug. But the disclosure
+    # note used to only say "confirm ... whether a different region is
+    # acceptable" without naming one, even though C4A Arm is available in
+    # asia-south1 (Mumbai) — the SAME region every other resource in this
+    # bill is already priced against. The note should name it.
+    rows = [row(product="Amazon Elastic Compute Cloud",
+                usage_type="APS5-BoxUsage:m7g.2xlarge",
+                operation="RunInstances", unit="Hrs", gcp_region="asia-south2")]
+    out = _with_sku(map_compute_arm, rows)
+    assert out[0]["strategy"] == "passthrough"
+    note = out[0]["projection_note"]
+    assert "no ARM family available in this region" in note
+    assert "asia-south1" in note
+    assert "IS available in nearby" in note
+
+
 # ---------------------------------------------------------------------------
 # GuardDuty / Security Hub
 # ---------------------------------------------------------------------------

@@ -96,3 +96,31 @@ def test_dms_rule_matches_and_is_not_marketplace_thirdparty():
 
     dms_rule = next(r for r in _rules() if r["match"] == "database migration")
     assert _rule_matches(dms_rule, product, "APS3-InstanceUsg:dms.r5.2xlarge", cs_product, {})
+
+
+def test_sagemaker_product_name_recognized_as_native_aws_service():
+    # Real AWS CUR product-field value (job 6a561187, $676.17 row): another
+    # native AWS service with no space after the "Amazon" prefix
+    # ("AmazonSageMaker"), same missing-alias bug class as DMS — canonical_
+    # service() returned None (no alias existed), so classify_mechanics.py's
+    # marketplace_thirdparty catch-all misclassified it as third-party SaaS,
+    # blocking the pre-existing, already-correct "sagemaker" service_map rule
+    # (SageMaker -> Vertex AI, review).
+    assert canonical_service("AmazonSageMaker") == "sagemaker"
+
+
+def test_sagemaker_rule_matches_and_is_not_marketplace_thirdparty():
+    import re
+
+    product = "AmazonSageMaker"
+    cs_product = canonical_service(product)
+    assert not (
+        bool(product)
+        and not re.match(r"^(amazon|aws)\b", product, re.IGNORECASE)
+        and cs_product is None
+    ), "SageMaker row would still be misclassified as marketplace_thirdparty"
+
+    sm_rule = next(r for r in _rules() if r["match"] == "sagemaker")
+    assert _rule_matches(
+        sm_rule, product, "APS3-MLflow:TrackingServerCompute-Small", cs_product, {}
+    )

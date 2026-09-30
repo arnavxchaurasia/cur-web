@@ -139,6 +139,14 @@
       "reason": "BI -> Looker Studio Pro. AWS QuickSight usage_type strings encode role/edition directly (Author vs Reader, Standard vs Enterprise/Pro) and the CUR quantity for these usage types IS the per-user/session count -- a deterministic static mapper (map_quicksight) now converts Author seats to Looker Studio Pro's published $9/user/mo; Reader/session and Q-Topic rows still passthrough (see map_quicksight docstring)."
     },
     {
+      "match": "amazonq",
+      "category": "AI/Dev Tools",
+      "gcp_service": "Gemini Code Assist",
+      "mode": "review",
+      "confidence": 55,
+      "reason": "Amazon Q Developer/Business is AWS's own first-party GenAI assistant -- a real AWS service, not third-party Marketplace SaaS (confirmed real: raw product code 'AmazonQ' has no space after 'Amazon', so it was falling through classify_mechanics.py's marketplace_thirdparty catch-all, which only excludes rows canonical_service() recognizes). Nearest GCP equivalent confirmed via the same live-catalog-sweep methodology used elsewhere: searched catalog.duckdb for a per-seat Code Assist/subscription SKU -- none exists (only per-token 'Gemini API' usage SKUs are exposed via the public Cloud Billing Catalog API this pipeline's catalog is built from). Gemini Code Assist Standard's published seat price ($19/user/mo) is exact parity with this row's own usage_type ('Amazon-Q-Developer-Pro-subscription-monthly', AWS's published Q Developer Pro price is also $19/user/mo) -- passthrough at AWS cost is the honest number until GCP exposes Code Assist seat pricing through the Billing Catalog API or a maintainer-curated contract-pricing table exists (same class of gap as Cloud Armor Enterprise, see the 'shield' rule above)."
+    },
+    {
       "match": "api gateway",
       "category": "API Management",
       "gcp_service": "Cloud Endpoints",
