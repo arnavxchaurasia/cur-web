@@ -64,3 +64,35 @@ def test_sns_and_sqs_rules_match_compact_product_names():
     sqs_rule = next(r for r in _rules() if "simple queue" in r["match"])
     assert _rule_matches(sns_rule, "AmazonSNS", "Requests-Tier1", canonical_service("AmazonSNS"), {})
     assert _rule_matches(sqs_rule, "AmazonSQS", "Requests-Tier1", canonical_service("AmazonSQS"), {})
+
+
+def test_dms_product_name_recognized_as_native_aws_service():
+    # Real AWS CUR product-field value (job 6a561187, $945.00 row): a native,
+    # first-party AWS service ("AWS Database Migration Service") with no space
+    # after the "AWS" prefix and no internal word separators at all
+    # ("AWSDatabaseMigrationSvc" is one PascalCase-concatenated ProductCode).
+    # canonical_service() previously returned None for it (no alias existed at
+    # all, unlike SES/SNS/SQS which had aliases but failed normalization) —
+    # which meant classify_mechanics.py's marketplace_thirdparty catch-all
+    # rule (guarded by `canonical_service(product) is None`) misclassified a
+    # genuine native AWS service as third-party marketplace spend, permanently
+    # blocking it from the pre-existing, already-correct "database migration"
+    # service_map rule (DMS -> Database Migration Service, flagged for $0
+    # candidacy since GCP DMS is free for homogeneous migrations).
+    assert canonical_service("AWSDatabaseMigrationSvc") == "dms"
+    assert canonical_service("AWS Database Migration Service") == "dms"
+
+
+def test_dms_rule_matches_and_is_not_marketplace_thirdparty():
+    import re
+
+    product = "AWSDatabaseMigrationSvc"
+    cs_product = canonical_service(product)
+    assert not (
+        bool(product)
+        and not re.match(r"^(amazon|aws)\b", product, re.IGNORECASE)
+        and cs_product is None
+    ), "DMS row would still be misclassified as marketplace_thirdparty"
+
+    dms_rule = next(r for r in _rules() if r["match"] == "database migration")
+    assert _rule_matches(dms_rule, product, "APS3-InstanceUsg:dms.r5.2xlarge", cs_product, {})

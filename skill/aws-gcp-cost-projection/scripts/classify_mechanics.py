@@ -67,6 +67,22 @@ def _re(value: str | None, pattern: str) -> bool:
         return False
     return bool(re.search(pattern, value, re.IGNORECASE))
 
+# AWS's own `pricing/unit` field spells "hourly" inconsistently across services
+# and bill formats: "Hrs" (most EC2 rows), lowercase "hours", and — confirmed
+# real on a live customer bill — plain "Hours" (title case) for EKS cluster
+# management-hours ("APS3-AmazonEKS-Hours:perCluster", pricing_unit="Hours").
+# managed_db's own unit check (below) already normalizes to lowercase for
+# exactly this reason; compute_windows/compute_burstable/compute_arm/
+# compute_breakdown/flat_hourly did NOT, so a case variant they'd never seen
+# (like "Hours") silently failed their gate and fell through to misc/LLM —
+# same "fix one path, miss the sibling path" bug class documented elsewhere in
+# this file. One shared, case-insensitive helper so this can't drift again.
+_HOURLY_UNITS = frozenset({"hrs", "hours", "hour", "hr", ""})
+
+
+def _is_hourly_unit(unit: str | None) -> bool:
+    return (unit or "").strip().lower() in _HOURLY_UNITS
+
 # Accelerator / specialized-silicon families: AI inference/training chips
 # (Inferentia inf*, Trainium trn*, Habana dl*) and GPU families (p*, g*, vt*).
 # These must NOT be mapped to a general-purpose CPU VM (N2D) — that hides the
@@ -215,7 +231,7 @@ RULES = [
             # a genuine EC2/NAT/LB/EKS instance-hour row from one of those
             # formats would silently bypass every deterministic mapper this
             # rule feeds and fall through to the wrong classification entirely.
-            and r["unit"] in ("Hrs", "hours", "")
+            and _is_hourly_unit(r["unit"])
             and not _is_accelerator(r)
         ),
     ),
@@ -255,7 +271,7 @@ RULES = [
             # a genuine EC2/NAT/LB/EKS instance-hour row from one of those
             # formats would silently bypass every deterministic mapper this
             # rule feeds and fall through to the wrong classification entirely.
-            and r["unit"] in ("Hrs", "hours", "")
+            and _is_hourly_unit(r["unit"])
             and not _re(r.get("usage_type", ""), r"running Windows")
             and not _re(r.get("operation", ""), r"(?i)Windows")
         ),
@@ -284,7 +300,7 @@ RULES = [
             # a genuine EC2/NAT/LB/EKS instance-hour row from one of those
             # formats would silently bypass every deterministic mapper this
             # rule feeds and fall through to the wrong classification entirely.
-            and r["unit"] in ("Hrs", "hours", "")
+            and _is_hourly_unit(r["unit"])
             and not _is_accelerator(r)
             and not _re(r.get("usage_type", ""), r"running Windows")
             and not _re(r.get("operation", ""), r"(?i)Windows")
@@ -366,7 +382,7 @@ RULES = [
             # a genuine EC2/NAT/LB/EKS instance-hour row from one of those
             # formats would silently bypass every deterministic mapper this
             # rule feeds and fall through to the wrong classification entirely.
-            and r["unit"] in ("Hrs", "hours", "")
+            and _is_hourly_unit(r["unit"])
         ),
     ),
     (
@@ -616,7 +632,7 @@ RULES = [
             # a genuine EC2/NAT/LB/EKS instance-hour row from one of those
             # formats would silently bypass every deterministic mapper this
             # rule feeds and fall through to the wrong classification entirely.
-            and r["unit"] in ("Hrs", "hours", "")
+            and _is_hourly_unit(r["unit"])
             # Fargate rows use Hrs but are caught by per_request above
             and not _re(r.get("product", ""), r"[Ff]argate")
             and not _re(r.get("usage_type", ""), r"[Ff]argate")
@@ -829,7 +845,7 @@ RULES = [
                 _ilike(r["product"], "Kinesis")
                 or _ilike(r["product"], "AmazonKinesis")
             )
-            and r.get("unit") in ("Hrs", "hours", "Shard-Hrs", "ShardHours")
+            and (_is_hourly_unit(r.get("unit")) or (r.get("unit") or "").lower() in ("shard-hrs", "shardhours"))
         ),
     ),
     (
