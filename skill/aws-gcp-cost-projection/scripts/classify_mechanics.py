@@ -944,10 +944,26 @@ RULES = [
         # Route 53 DNS query charges → Cloud DNS. PDF-format bills set unit=None
         # so this must match by product name, not unit. Route 53 and Cloud DNS
         # are at cost parity ($0.40/M for first 1B queries, $0.20/M thereafter).
+        #
+        # "AWS Route 53 Application Recovery Controller" (ARC) is a DIFFERENT
+        # product that only shares the "Route 53" brand name — a multi-region
+        # failover control-plane (billed as e.g. "Global-Cluster-Hours", an
+        # HOURLY cluster fee, pricing_unit="hours"), not a per-DNS-query
+        # charge at all. Confirmed real: a live bill's ARC row ($1,237.50,
+        # 495 cluster-hours) was matched here anyway (bare "Route 53"
+        # substring), then priced as if 495 were a DNS QUERY count against
+        # Cloud DNS's tiered $0.40/M-query rate — 495 queries rounds to
+        # $0.0002, reported as GCP cost = $0.00 -> a fabricated "100% savings"
+        # that was actually just a unit mismatch, not a real comparison.
+        # Excluded here so it falls through to its own dedicated service_map
+        # rule (honest passthrough, no invented DNS pricing) instead.
         "per_request",
         lambda r: (
-            _ilike(r["product"], "Route 53")
-            or _re(r.get("usage_type", ""), r"Route53|DNS-Queries")
+            (
+                _ilike(r["product"], "Route 53")
+                or _re(r.get("usage_type", ""), r"Route53|DNS-Queries")
+            )
+            and not _ilike(r["product"], "Application Recovery Controller")
         ),
     ),
     (

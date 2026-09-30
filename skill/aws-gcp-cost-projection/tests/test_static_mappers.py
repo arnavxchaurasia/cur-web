@@ -21,6 +21,7 @@ Golden values tested:
   - S3 monitoring-fee → passthrough (no-equivalent)
 """
 
+import os
 import pytest
 from unittest.mock import patch
 from conftest import row
@@ -51,6 +52,7 @@ from apply_static_mappings import (
     map_guardduty, map_redshift, map_athena, map_kinesis,
     map_efs, map_fsx, map_xray, map_emr, map_compute_windows, map_compute_arm,
     map_compute_burstable, map_flat_hourly,
+    map_rds_extended_support,
     _emr_vcpus,
 )
 
@@ -651,16 +653,23 @@ def test_cloudwatch_custom_metrics_high_volume_not_silently_zeroed():
     # never that literal phrase) and fell through to the generic passthrough
     # bucket. It must now be recognized as custom-metrics, and because the count
     # is far above the "tens-to-hundreds" range the ignore/$0 assumption relies
-    # on, it must NOT be silently zeroed either — it should route to review with
-    # the AWS cost kept as a placeholder.
+    # on, it must NOT be silently zeroed either. It now maps to a real, sourced
+    # estimate (Google's own published 8-bytes/scalar-datapoint rate at standard
+    # 1-datapoint/minute resolution) via the real Metric Volume SKU, rather than
+    # either a bare passthrough or a "review" strategy string (the render
+    # pipeline's strategy vocabulary is only map/passthrough/ignore; a stray
+    # "review" value once fell through render_report.py's strategy checks
+    # entirely, rendering blank "—" cells instead of a dollar amount — caught
+    # live on job d01fb92d row 28).
     rows = [row(product="AmazonCloudWatch",
                 usage_type="APS3-CW:MetricMonitorUsage",
                 operation="MetricStorage", unit="Metrics",
                 total_usage=11764.42, aws_amortized_cost=3013.00)]
     out = _with_sku(map_cloudwatch, rows)
-    assert out[0]["strategy"] == "review"
+    assert out[0]["strategy"] == "map"
     assert out[0]["gcp_service"] == "Cloud Monitoring"
-    assert out[0]["unit_multiplier"] == 1.0
+    assert out[0]["gcp_sku_name"] == "Metric Volume"
+    assert abs(out[0]["unit_multiplier"] - 0.33416748) < 1e-9
 
 
 def test_cloudwatch_database_insights_ignored():
@@ -775,4 +784,65 @@ def test_burstable_classifier_t4g_does_not_land_in_compute_arm():
     group = classify(r)
     assert group == "compute_burstable", (
         f"t4g misrouted to {group!r}; should be compute_burstable"
+    )
+
+
+# ---------------------------------------------------------------------------
+# RDS Extended Support
+# ---------------------------------------------------------------------------
+
+def test_rds_extended_support_mysql57_maps_to_real_sku():
+    rows = [row(product="Amazon Relational Database Service",
+                usage_type="APS3-ExtendedSupport:Yr1-Yr2:MySQL5.7",
+                deployment_option="Single-AZ", unit="Hrs")]
+    out = _with_sku(map_rds_extended_support, rows)
+    assert out[0]["gcp_service"] == "Cloud SQL"
+    assert "5.6/5.7" not in out[0]["projection_note"]
+
+
+def test_rds_extended_support_mysql80_notes_dated_future_start():
+    # Job d01fb92d row 9: MySQL 8.0 has no Cloud SQL Extended Support catalog
+    # SKU yet, so $0 today is correct — but Google's own docs (docs.cloud.
+    # google.com/sql/docs/mysql/db-versions) publish a concrete extended-
+    # support start date (2027-01-01) for it. The note must say that
+    # explicitly (a dated, verifiable fact) rather than imply an open-ended
+    # "GCP hasn't built this" gap.
+    rows = [row(product="Amazon Relational Database Service",
+                usage_type="APS3-ExtendedSupport:Yr1-Yr2:MySQL8.0",
+                deployment_option="Single-AZ", unit="Hrs")]
+    out = _with_sku(map_rds_extended_support, rows)
+    assert out[0]["strategy"] == "ignore"
+    assert "2027-01-01" in out[0]["projection_note"]
+
+
+# ---------------------------------------------------------------------------
+# Strategy-vocabulary guardrail
+# ---------------------------------------------------------------------------
+
+def test_no_mapper_emits_an_unrecognized_strategy_value():
+    # render_report.py's strategy_badge logic (and the report's cost columns)
+    # only recognize "passthrough" and "ignore" explicitly, with "map" as the
+    # implicit third value carrying a resolved SKU rate. Any OTHER literal
+    # string silently falls through every check — no strategy badge, and the
+    # GCP cost columns render as blank "—" instead of a dollar figure, with
+    # no error anywhere in the pipeline to surface it. Confirmed real: a
+    # CloudWatch custom-metrics fix once emitted "strategy": "review" (meant
+    # as "passthrough, but flag for human review"), which rendered the whole
+    # row's GCP-cost columns blank on a live job instead of carrying the AWS
+    # cost forward as intended. This test statically scans every literal
+    # "strategy": "<value>" assignment in apply_static_mappings.py so a future
+    # mapper can't reintroduce an unrecognized value the same way.
+    import re
+
+    src_path = os.path.join(
+        os.path.dirname(__file__), "..", "scripts", "apply_static_mappings.py"
+    )
+    src = open(src_path, encoding="utf-8").read()
+    literal_values = re.findall(r'"strategy":\s*"([a-z_]+)"', src)
+    assert literal_values, "expected to find at least one strategy literal"
+    unrecognized = sorted(set(literal_values) - {"map", "passthrough", "ignore"})
+    assert not unrecognized, (
+        f"apply_static_mappings.py assigns unrecognized strategy value(s) "
+        f"{unrecognized!r} — render_report.py only handles "
+        f"'passthrough'/'ignore'/'map'; anything else renders blank cost cells"
     )

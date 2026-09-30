@@ -86,6 +86,29 @@ CDN_EGRESS_TIERS = _cdn_cfg if _cdn_cfg else {
 }
 
 
+# GCP legacy regions that charge $0.01/GiBy for inter-zone egress.
+# All other regions have been free since October 2023.
+_INTERZONE_LEGACY_REGIONS = frozenset({
+    "us-central1", "us-east1", "us-west1", "asia-east1", "europe-west1",
+})
+
+# Catalog SKU IDs for inter-zone traffic.
+_INTERZONE_SKU_PAID = "DE9E-AFBC-A15A"   # 5 legacy regions, $0.01/GiBy
+_INTERZONE_SKU_FREE = "C1F1-02CA-F355"   # all other regions, $0.00/GiBy
+
+
+def interzone_sku_for_region(gcp_region):
+    """Return (sku_id, sku_name, rate_usd_per_gb) for inter-zone egress in gcp_region.
+
+    GCP made inter-zone egress free outside the 5 original regions (Oct 2023).
+    gcp_region may be None (unknown) — defaults to the paid legacy rate so we
+    never under-project when the region is missing.
+    """
+    if gcp_region and gcp_region not in _INTERZONE_LEGACY_REGIONS:
+        return (_INTERZONE_SKU_FREE, "Network Inter Zone Data Transfer Out", 0.0)
+    return (_INTERZONE_SKU_PAID, "Network Inter Zone Data Transfer Out", 0.01)
+
+
 def cdn_egress_rate(bucket, total_gb):
     """Return (sku_id, sku_name, rate_usd_per_gb) for the cheapest applicable tier.
 

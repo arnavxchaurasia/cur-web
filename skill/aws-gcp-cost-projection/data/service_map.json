@@ -336,7 +336,7 @@
       "gcp_service": "Database Migration Service",
       "mode": "review",
       "confidence": 88,
-      "reason": "DMS -> Database Migration Service. Note: GCP DMS is FREE for homogeneous migrations (MySQL->Cloud SQL etc.) — passthrough likely over-projects; review for $0 candidacy."
+      "reason": "AWS DMS billed per replication-instance-hour; GCP DMS billed per GiB of data copied ($2.08/GiB CDC in Mumbai, $0 for full dump). Ongoing CDC use (typical for $900+/mo spend) has real GCP cost but units are incompatible — passthrough until CDC data volume is known."
     },
     {
       "match": "sagemaker",
@@ -489,6 +489,14 @@
       "mode": "review",
       "confidence": 70,
       "reason": "Route 53 Resolver endpoint -> Cloud DNS forwarding, not a managed zone."
+    },
+    {
+      "match": "route 53 application recovery controller",
+      "category": "Networking",
+      "gcp_service": "Manual Review",
+      "mode": "review",
+      "confidence": 55,
+      "reason": "Route 53 Application Recovery Controller (ARC) is a multi-region failover control-plane (recovery cluster, routing controls, safety rules -- billed hourly, e.g. 'Global-Cluster-Hours') -- a fundamentally different product from plain Route 53 DNS, despite sharing the brand name. Confirmed via live catalog sweep: no GCP product matches this control-plane/cluster concept (Cloud DNS's only SKUs are 'DNS Query' and 'ManagedZone', a per-query/per-zone billing model that does not fit an hourly cluster fee at all -- a prior bug matched this row against the generic Route 53 rule below and priced its hourly quantity as if it were a DNS query count, producing a fabricated near-$0 GCP cost). Nearest conceptual equivalent would be a hand-built combination of Cloud DNS routing policies + health checks + Cloud Monitoring alerting, not a packaged, comparably-billed product -- passthrough at AWS cost is the honest number. Ordered before the generic 'route 53'/'route53' rules below so this specific product is never absorbed by the brand-name substring match."
     },
     {
       "match": "route 53",

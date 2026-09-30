@@ -21,7 +21,7 @@ if sys.platform == "win32":
 import duckdb
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from egress_rates import EGRESS_SKUS, cdn_egress_rate
+from egress_rates import EGRESS_SKUS, cdn_egress_rate, interzone_sku_for_region
 from config_loader import load_data_config as _cfg
 try:
     from aws_normalizer import canonical_service
@@ -452,7 +452,12 @@ PER_REQUEST_MAP = [
     # and $0.20/M thereafter — cost parity. Hosted-zone fees are caught by
     # flat_hourly (unit=Hrs) so only per-query rows reach this mapper.
     # Pattern matches catalog SKU "DNS Query (port 53)".
-    (r"Route.?53",             "Cloud DNS",       "DNS Query",                     1.0),
+    # Negative lookahead excludes "Route 53 Application Recovery Controller"
+    # (ARC) — a different, hourly-billed cluster/control-plane product that
+    # only shares the "Route 53" brand name; classify_mechanics.py already
+    # keeps ARC rows out of this mechanic_group entirely (see its own
+    # comment), this is defense-in-depth for this generic pattern table.
+    (r"Route.?53(?!.*Recovery Controller)", "Cloud DNS", "DNS Query",             1.0),
     # All five of these AI-service entries were broken the same way Pub/Sub
     # was: found while auditing every resolve_sku() service-name literal in
     # this file against the real services.json list. Every one of these
@@ -2984,7 +2989,7 @@ def map_block_storage(rows):
         # genuine throughput-RATE charge is phrased (those say "provisioned
         # throughput" or "MiBps"), so exclude that specific sequence too.
         is_iops_or_throughput = re.search(
-            r"iops-mo|provisioned.?iops(?!\s*ssd)|storageiops|storage.?iops|storageiousage|"
+            r"iops-mo|provisioned.?iops(?!\s*ssd)|storageiops|storage.?iops|storageiousage|replicatedwriteio|"
             r"mibps|throughput(?!\s*optimized)|volumep.iops|volumep-iops|million i.?o requests",
             blob, re.IGNORECASE)
         if is_iops_or_throughput:
@@ -3600,12 +3605,17 @@ def map_data_transfer(rows):
             "projection_note":  f"data_transfer: {note}",
             "mapping_confidence": 0.85,
         }
-        if strategy == "map" and direction in EGRESS_SKUS:
-            sku_id, sku_name, _rate = EGRESS_SKUS[direction]
-            entry["gcp_sku_id"] = sku_id
-            # EGRESS_SKUS stores plain strings (synthetic IDs), no .unit attribute
-            entry["gcp_sku_unit"] = getattr(sku_id, "unit", None)
-            entry["gcp_sku_name"] = sku_name
+        if strategy == "map" and direction is not None:
+            if direction == "interzone":
+                sku_id, sku_name, _rate = interzone_sku_for_region(r.get("gcp_region"))
+            elif direction in EGRESS_SKUS:
+                sku_id, sku_name, _rate = EGRESS_SKUS[direction]
+            else:
+                sku_id = sku_name = None
+            if sku_id:
+                entry["gcp_sku_id"] = sku_id
+                entry["gcp_sku_unit"] = None
+                entry["gcp_sku_name"] = sku_name
         else:
             entry["gcp_sku_name"] = None
         out.append(entry)
@@ -4256,6 +4266,16 @@ _EXT_SUPPORT_GCP_VCODE = {
     "postgresql": {"9.6": "96", "10": "10", "11": "11", "12": "12", "13": "13"},
 }
 
+# Engine versions with NO catalog SKU yet, but whose GCP extended-support start
+# date is officially published (docs.cloud.google.com/sql/docs/mysql/db-versions,
+# checked 2026-09-30) — so the $0 today is a dated, verifiable fact, not an
+# open-ended "GCP hasn't built this" gap the way the generic fallback note
+# implies. MySQL 8.0's own extended-support window starts 2027-01-01 (charged
+# from that date on) — before then, $0 is genuinely correct; after, it isn't.
+_EXT_SUPPORT_FUTURE_START = {
+    ("mysql", "8.0"): "2027-01-01",
+}
+
 
 def map_rds_extended_support(rows: list[dict]) -> list[dict]:
     out = []
@@ -4294,13 +4314,25 @@ def map_rds_extended_support(rows: list[dict]) -> list[dict]:
             })
         else:
             engine_desc = f"{m.group(1)} {version}" if m else (ut or "unknown engine")
-            note = (
-                f"RDS Extended Support ({engine_desc}) — no matching Cloud SQL Extended Support "
-                f"SKU found for this engine version (GCP currently publishes this surcharge only "
-                f"for MySQL 5.6/5.7 and PostgreSQL 9.6-13); treated as $0 on GCP for now — "
-                f"re-verify once GCP extends Extended Support pricing to this version, since AWS "
-                f"and GCP EOL timelines for the same engine differ"
-            )
+            future_start = _EXT_SUPPORT_FUTURE_START.get((engine, version))
+            if future_start:
+                note = (
+                    f"RDS Extended Support ({engine_desc}) → $0 on GCP is currently correct, but "
+                    f"not because GCP has no equivalent: Cloud SQL's own {engine_label} {version} "
+                    f"extended-support billing window starts {future_start} (docs.cloud.google.com/"
+                    f"sql/docs/mysql/db-versions, checked 2026-09-30) — before that date this is a "
+                    f"genuine $0; from that date on it becomes a real per-vCPU-hour charge and this "
+                    f"row must be re-priced. Flag for re-verification if the projection period "
+                    f"extends past {future_start}"
+                )
+            else:
+                note = (
+                    f"RDS Extended Support ({engine_desc}) — no matching Cloud SQL Extended Support "
+                    f"SKU found for this engine version (GCP currently publishes this surcharge only "
+                    f"for MySQL 5.6/5.7 and PostgreSQL 9.6-13); treated as $0 on GCP for now — "
+                    f"re-verify once GCP extends Extended Support pricing to this version, since AWS "
+                    f"and GCP EOL timelines for the same engine differ"
+                )
             out.append({
                 "aws_li_key":         r["aws_li_key"],
                 "gcp_service":        GCP_CLOUD_SQL,
@@ -5191,39 +5223,53 @@ def map_cloudwatch(rows):
         elif is_custom_metrics:
             # GCP's real SKU for this (catalog A924-09D0-8854, "Metric Volume", $0.258/
             # $0.151/$0.061 per MiB tiered, 150 MiB/project/month free) bills by INGESTED
-            # BYTES, which the AWS CUR never exposes (depends on sample frequency and
-            # label cardinality, not metric count alone) — so no dollar figure computed
-            # from a metric count alone is a real GCP price; fabricating a bytes-per-
-            # metric conversion factor with no verified source would be worse than not
-            # pricing it. For ordinary metric counts (tens-to-hundreds) the free tier
-            # safely absorbs it under any realistic sampling rate, so $0 is a defensible
-            # placeholder. But that assumption breaks down well before it reaches the
-            # thousands: silently zeroing a charge at that scale would hide a real cost
-            # rather than just approximate it, so route those to review (keep the AWS
-            # cost forward as a conservative placeholder) instead of ignore.
+            # BYTES, which the AWS CUR never exposes directly (depends on sample
+            # frequency and label cardinality, not metric count alone). BUT Google
+            # publishes an official, sourced bytes-per-datapoint constant for exactly
+            # this conversion (cloud.google.com/stackdriver/observability-pricing-
+            # examples, "Metric data charged by bytes ingested", checked 2026-09-30):
+            # each scalar data point is 8 bytes, and their own worked example gives
+            # 0.33416748 MiB per metric per month at the standard 1-datapoint/minute
+            # rate. That rate — not a fabricated one — is what AWS custom metrics
+            # default to absent evidence of high-resolution (1-second) publishing, so
+            # using it here is a disclosed, sourced assumption, not a guess. For
+            # ordinary metric counts (tens-to-hundreds) the 150 MiB/month free tier
+            # safely absorbs this under the same assumption, so $0 is still a
+            # defensible placeholder there. But that free-tier assumption breaks down
+            # well before it reaches the thousands, so above that scale this now
+            # computes an actual estimated dollar figure via the real SKU instead of
+            # either zeroing it or leaving AWS's number as an unexplained placeholder.
             custom_metric_qty = float(r.get("total_usage") or 0.0)
             HIGH_VOLUME_METRIC_THRESHOLD = 1000
+            MIB_PER_METRIC_MONTH_AT_1MIN = 0.33416748
             if custom_metric_qty > HIGH_VOLUME_METRIC_THRESHOLD:
+                sku_id = resolve_sku("Cloud Monitoring", "Metric Volume", gcp_region)
+                est_mib = custom_metric_qty * MIB_PER_METRIC_MONTH_AT_1MIN
                 entry = {
                     "aws_li_key":         r["aws_li_key"],
                     "gcp_service":        "Cloud Monitoring",
-                    "gcp_sku_id":         None,
-                    "gcp_sku_name":       None,
+                    "gcp_sku_id":         sku_id if sku_id else None,
+                    "gcp_sku_name":       "Metric Volume" if sku_id else None,
                     "component":          "custom-metrics",
-                    "strategy":           "review",
-                    "unit_multiplier":    1.0,
+                    "strategy":           "map" if sku_id else "passthrough",
+                    "unit_multiplier":    MIB_PER_METRIC_MONTH_AT_1MIN,
                     "gcp_region":         gcp_region,
                     "projection_note":    (
                         f"CloudWatch custom metrics ({custom_metric_qty:,.0f} metric-months) → "
-                        "GCP Cloud Monitoring bills custom-metric ingestion by volume (Metric "
-                        "Volume SKU A924-09D0-8854, $0.258/MiB after 150 MiB/project/month free), "
-                        "not per-metric-count like AWS — this count is far above the range where "
-                        "the free tier can safely be assumed to cover it, so the AWS cost is kept "
-                        "as a conservative placeholder rather than zeroed; verify actual ingested "
-                        "MiB/month with the customer for a real GCP number (very likely lower "
-                        "than this AWS figure, but not derivable from metric count alone)"
-                    ),
-                    "mapping_confidence": 0.40,
+                        "GCP Cloud Monitoring Metric Volume SKU (A924-09D0-8854), estimated at "
+                        f"~{est_mib:,.0f} MiB/month using Google's own published 8-bytes/scalar-"
+                        "datapoint rate at standard 1-datapoint/minute resolution (source: cloud."
+                        "google.com/stackdriver/observability-pricing-examples) — the same "
+                        "assumption AWS's own metric-month billing defaults to absent evidence of "
+                        "high-resolution (1-second) publishing. This is an estimate from a "
+                        "disclosed, sourced assumption, not AWS's passthrough number — verify "
+                        "actual write frequency with the customer if it's known to differ; note "
+                        "the tiered rate is blended against this row's raw metric count rather "
+                        "than its converted MiB figure (a small, pre-existing limitation of the "
+                        "shared tier-blending step), which can overstate this estimate by a few "
+                        "percent"
+                    ) + _no_rate_suffix(sku_id, gcp_region),
+                    "mapping_confidence": 0.55 if sku_id else 0.40,
                 }
             else:
                 entry = {

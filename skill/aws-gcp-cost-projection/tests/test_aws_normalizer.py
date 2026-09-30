@@ -134,3 +134,50 @@ def test_sagemaker_rule_matches_and_is_not_marketplace_thirdparty():
     assert _rule_matches(
         sm_rule, product, "APS3-MLflow:TrackingServerCompute-Small", cs_product, {}
     )
+
+
+def test_rds_mysql_community_edition_rule_does_not_zero_generic_rds_rows():
+    # Regression for job d01fb92d (row 7, $6,783.08): the service_map rule
+    # "relational database service for mysql community edition" (mode=ignore,
+    # meant ONLY for AWS's distinct "RDS for MySQL Community Edition" EOL-
+    # surcharge product) was reachable via canonical_service-equivalence for
+    # ANY plain "Amazon Relational Database Service" row — because
+    # canonical_service()'s substring fallback found the shorter embedded
+    # alias "relational database service" (-> "rds") inside the rule's own,
+    # longer match text, collapsing a narrow rule onto the generic RDS key.
+    # Since mechanic_group "managed_db" isn't in DETERMINISTIC_GROUPS, this
+    # silently zeroed a genuine $6,783.08 Aurora Serverless v2 I/O-Optimized
+    # compute charge, mislabeling it as a "MySQL 5.7 EOL surcharge" it had
+    # nothing to do with. Fixed by giving the rule's own match text a
+    # dedicated alias key distinct from the generic "rds" one.
+    generic_rds_cs = canonical_service("Amazon Relational Database Service")
+    rule_text_cs = canonical_service(
+        "relational database service for mysql community edition"
+    )
+    assert generic_rds_cs == "rds"
+    assert rule_text_cs != generic_rds_cs
+
+    mysql_rule = next(
+        r
+        for r in _rules()
+        if r["match"] == "relational database service for mysql community edition"
+    )
+    assert not _rule_matches(
+        mysql_rule,
+        "Amazon Relational Database Service",
+        "APS3-Aurora:ServerlessV2IOOptimizedUsage",
+        generic_rds_cs,
+        {},
+    ), "generic RDS/Aurora row must not match the MySQL-Community-Edition-only rule"
+
+    # The genuine target product must still match correctly.
+    specific_cs = canonical_service(
+        "Amazon Relational Database Service for MySQL Community Edition"
+    )
+    assert _rule_matches(
+        mysql_rule,
+        "Amazon Relational Database Service for MySQL Community Edition",
+        "APS3-ExtendedSupport:Yr1-Yr2:MySQL5.7",
+        specific_cs,
+        {},
+    )
