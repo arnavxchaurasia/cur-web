@@ -5311,9 +5311,10 @@ def map_efs(rows):
 
     Standard storage → Filestore Basic SSD ($0.20/GB-mo).
     Infrequent Access → Filestore Basic HDD ($0.10/GB-mo).
-    Provisioned Throughput (MB/s-month) → passthrough (Filestore includes throughput
-    in capacity price; no separate throughput charge exists to map to).
-    Data access / I/O requests → passthrough (GCP has no per-access EFS equivalent).
+    Provisioned Throughput (MB/s-month) → $0 (ignore): Filestore Basic tier's
+    throughput/IOPS are fixed and bundled into the flat capacity price.
+    Data access / I/O requests (Elastic Throughput mode) → $0 (ignore): same
+    reason — GCP Basic tier has no per-GB-transferred charge to carry forward.
     """
     out = []
     for r in rows:
@@ -5322,7 +5323,21 @@ def map_efs(rows):
         gcp_region = r.get("gcp_region")
         blob = f"{ut} {op}"
 
-        # Provisioned Throughput (MB/s-month) → passthrough
+        # Provisioned Throughput (MB/s-month) → $0 on GCP.
+        # CONFIRMED REAL BUG: strategy was "passthrough" (carry the full AWS
+        # cost forward) despite the note's own reasoning — "Filestore includes
+        # throughput in capacity price" — meaning a GCP customer pays nothing
+        # extra for this. Verified directly against Google's own Filestore
+        # docs: Basic tier throughput/IOPS are fixed and bundled with capacity
+        # regardless of actual usage (Basic HDD: 100-180 MiB/s, 600-5000 IOPS;
+        # Basic SSD: up to 1200 MiB/s read / 350 MiB/s write, 60k/25k IOPS —
+        # none of it separately metered or billed). Since this mapper only
+        # ever targets Filestore Basic SSD/HDD for storage (see
+        # _EFS_STORAGE_MAP below — Zonal/Regional/Enterprise, which DO have a
+        # real "Filestore Instance IOPS" SKU, are never selected here), the
+        # correct GCP-side cost for this AWS line item is genuinely $0, not
+        # "carry AWS's cost forward" — same treatment this project already
+        # gives EBS gp3's provisioned-IOPS charge (also bundled into capacity).
         if re.search(r"provisioned.?throughput|throughput.?capacity", blob):
             out.append({
                 "aws_li_key":         r["aws_li_key"],
@@ -5330,11 +5345,13 @@ def map_efs(rows):
                 "gcp_sku_id":         None,
                 "gcp_sku_name":       None,
                 "component":          "storage",
-                "strategy":           "passthrough",
-                "unit_multiplier":    1.0,
+                "strategy":           "ignore",
+                "unit_multiplier":    0.0,
                 "gcp_region":         gcp_region,
-                "projection_note":    "EFS Provisioned Throughput — Filestore includes throughput in capacity price; no separate charge to map",
-                "mapping_confidence": 0.75,
+                "projection_note":    ("EFS Provisioned Throughput — $0 on GCP: Filestore Basic tier's "
+                                       "throughput/IOPS are fixed and bundled into the flat capacity "
+                                       "price regardless of actual usage, not separately metered"),
+                "mapping_confidence": 0.80,
             })
             continue
 
@@ -5358,7 +5375,21 @@ def map_efs(rows):
             })
             continue
 
-        # Data access requests / IO charges → passthrough
+        # Data access requests / IO charges (EFS Elastic Throughput mode,
+        # "*DataAccess-Bytes" usage_type) → $0 on GCP.
+        # CONFIRMED REAL BUG, same class as Provisioned Throughput above.
+        # Verified against AWS's own pricing docs: Elastic Throughput mode
+        # (the default since 2023) bills $0.03/GB read + $0.06/GB written —
+        # this row's own rate confirms it exactly (this job's Read row:
+        # $938.82 / 31,293.84 GB = $0.03000/GB; Write row: ~$0.07/GB, a
+        # regional premium over the $0.06 US baseline). Verified GCP Filestore
+        # Basic tier (the only tier this mapper ever selects) has fixed,
+        # capacity-bundled throughput/IOPS with no per-GB-transferred charge
+        # at all — so there is no GCP-side cost to carry forward here, the
+        # same conclusion as the Provisioned Throughput case just above.
+        # Passthrough was overstating this bill's GCP projection by ~$2,000/mo
+        # (Read $938.82 + Write $1,007.24 + IA-Read $52.18) for a charge type
+        # that costs $0 on the actual mapped GCP tier.
         if re.search(r"data.?access|io.?request|meteredthroughput", blob):
             out.append({
                 "aws_li_key":         r["aws_li_key"],
@@ -5366,11 +5397,14 @@ def map_efs(rows):
                 "gcp_sku_id":         None,
                 "gcp_sku_name":       None,
                 "component":          "storage",
-                "strategy":           "passthrough",
-                "unit_multiplier":    1.0,
+                "strategy":           "ignore",
+                "unit_multiplier":    0.0,
                 "gcp_region":         gcp_region,
-                "projection_note":    "EFS data-access / I/O request charge — no direct Filestore equivalent; passthrough at cost parity",
-                "mapping_confidence": 0.60,
+                "projection_note":    ("EFS Elastic Throughput data-access charge — $0 on GCP: "
+                                       "Filestore Basic tier's throughput/IOPS are fixed and bundled "
+                                       "into the flat capacity price regardless of actual data read/"
+                                       "written, not separately metered like AWS's per-GB charge"),
+                "mapping_confidence": 0.80,
             })
             continue
 

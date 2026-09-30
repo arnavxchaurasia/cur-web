@@ -452,11 +452,29 @@ def test_efs_ia_maps_to_basic_hdd():
     assert "HDD" in out[0]["gcp_sku_name"]
 
 
-def test_efs_provisioned_throughput_passthrough():
+def test_efs_provisioned_throughput_is_ignored_not_passthrough():
+    # CONFIRMED REAL BUG: this used to passthrough (carry AWS's cost forward)
+    # despite Filestore Basic tier's throughput being fixed/bundled into the
+    # flat capacity price at no extra usage-based cost — the real GCP-side
+    # cost for this AWS line item is $0, verified against Google's own
+    # Filestore service-tier docs.
     rows = [row(product="Amazon Elastic File System",
                 usage_type="ProvisionedThroughput-MBps", unit="MBps-Mo")]
     out = _with_sku(map_efs, rows)
-    assert out[0]["strategy"] == "passthrough"
+    assert out[0]["strategy"] == "ignore"
+    assert out[0]["unit_multiplier"] == 0.0
+
+
+def test_efs_data_access_elastic_throughput_is_ignored_not_passthrough():
+    # CONFIRMED REAL BUG, same class: EFS Elastic Throughput mode's per-GB
+    # read/write "*DataAccess-Bytes" charge used to passthrough at full AWS
+    # cost (a real ~$2,000/mo overprojection on one job) despite GCP Filestore
+    # Basic tier having no per-GB-transferred charge at all to carry forward.
+    rows = [row(product="Amazon Elastic File System",
+                usage_type="APS3-ETDataAccess-Bytes", operation="Write", unit="GB")]
+    out = _with_sku(map_efs, rows)
+    assert out[0]["strategy"] == "ignore"
+    assert out[0]["unit_multiplier"] == 0.0
 
 
 # ---------------------------------------------------------------------------
