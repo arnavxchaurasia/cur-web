@@ -117,9 +117,81 @@ def _build_projection_view_sql(dominant_region: str, assumptions: dict | None = 
     cols = {c.lower() for c in (catalog_cols or set())}
     has_ut = "usage_type" in cols if cols else True
     has_op = "operation" in cols if cols else True
+    has_aws_od = "aws_od_cost" in cols if cols else False
+    has_od_basis = "od_basis" in cols if cols else False
     ut_expr = "COALESCE(c.usage_type, '')" if has_ut else "''"
     op_expr = "COALESCE(c.operation, '')" if has_op else "''"
     text_expr = f"(LOWER({ut_expr} || ' ' || {op_expr}))"
+
+    reconstructed_od_expr = f"""CASE
+          WHEN LOWER(COALESCE(c.line_item_type, '')) IN ('rifee', 'savingsplanrecurringfee')
+            OR {op_expr} ILIKE '%hourly commitment%'
+            OR {ut_expr} ILIKE '%hourly commitment%'
+            OR {op_expr} ILIKE '%recurring fee%'
+            OR {ut_expr} ILIKE '%recurring fee%'
+            OR {op_expr} ILIKE '%reserved instance fee%'
+            OR {ut_expr} ILIKE '%reserved instance fee%'
+            OR (LOWER(COALESCE(c.product, '')) ILIKE '%savings plan%' AND {text_expr} ILIKE '%hourly commitment%')
+            THEN c.aws_amortized_cost
+          WHEN LOWER(COALESCE(c.pricing_model, '')) = 'spot'
+            OR {ut_expr} ILIKE '%spot%'
+            OR {op_expr} ILIKE '%spot%'
+            THEN c.aws_amortized_cost / {spot_div}
+          WHEN LOWER(COALESCE(c.pricing_model, '')) = 'committed'
+            OR LOWER(COALESCE(c.pricing_model, '')) = 'reserved'
+            OR LOWER(COALESCE(c.line_item_type, '')) = 'discountedusage'
+            OR {ut_expr} ILIKE '%reserved%'
+            OR {op_expr} ILIKE '%reserved%'
+            OR {ut_expr} ILIKE '%savings%plan%'
+            OR {op_expr} ILIKE '%savings%plan%'
+            THEN
+              CASE
+                WHEN REGEXP_MATCHES({text_expr}, '\\b(3-year|36\\s*mo|36\\s*month)\\b|3\\s+yr|3\\s+year|3yr')
+                  THEN c.aws_amortized_cost / {ri3_div}
+                ELSE c.aws_amortized_cost / {ri1_div}
+              END
+          ELSE c.aws_amortized_cost
+        END"""
+
+    od_cost_expr = f"COALESCE(c.aws_od_cost, {reconstructed_od_expr})" if has_aws_od else reconstructed_od_expr
+
+    od_basis_expr = (
+        f"""COALESCE(c.od_basis,
+          CASE
+            WHEN LOWER(COALESCE(c.pricing_model, '')) = 'spot'
+              OR {ut_expr} ILIKE '%spot%'
+              OR {op_expr} ILIKE '%spot%'
+              THEN 'reconstructed_default'
+            WHEN LOWER(COALESCE(c.pricing_model, '')) IN ('committed', 'reserved')
+              OR LOWER(COALESCE(c.line_item_type, '')) = 'discountedusage'
+              OR {ut_expr} ILIKE '%reserved%'
+              OR {op_expr} ILIKE '%reserved%'
+              OR {ut_expr} ILIKE '%savings%plan%'
+              OR {op_expr} ILIKE '%savings%plan%'
+              THEN 'reconstructed_default'
+            WHEN LOWER(COALESCE(c.pricing_model, '')) = 'ondemand'
+              AND LOWER(COALESCE(c.line_item_type, '')) = 'usage'
+              THEN 'public_od'
+            ELSE 'amortized_fallback'
+          END
+        )""" if has_od_basis else f"""CASE
+          WHEN LOWER(COALESCE(c.pricing_model, '')) = 'spot'
+            OR {ut_expr} ILIKE '%spot%'
+            OR {op_expr} ILIKE '%spot%'
+            THEN 'reconstructed'
+          WHEN LOWER(COALESCE(c.pricing_model, '')) IN ('committed', 'reserved')
+            OR LOWER(COALESCE(c.line_item_type, '')) = 'discountedusage'
+            OR {ut_expr} ILIKE '%reserved%'
+            OR {op_expr} ILIKE '%reserved%'
+            OR {ut_expr} ILIKE '%savings%plan%'
+            OR {op_expr} ILIKE '%savings%plan%'
+            THEN 'reconstructed'
+          WHEN LOWER(COALESCE(c.pricing_model, '')) = 'ondemand'
+            AND LOWER(COALESCE(c.line_item_type, '')) = 'usage'
+            THEN 'public_od'
+          ELSE 'amortized_fallback'
+        END"""
+    )
     return f"""
 CREATE OR REPLACE VIEW gcp_projection AS
 -- passthrough double-count guard: a passthrough's AWS cost belongs to the LINE ITEM,
@@ -255,35 +327,9 @@ SELECT  c.aws_li_key, c.product, c.aws_region, c.gcp_region,
               END
           ELSE 'on_demand'
         END AS commitment_basis,
-        CASE
-          WHEN LOWER(COALESCE(c.line_item_type, '')) IN ('rifee', 'savingsplanrecurringfee')
-            OR {op_expr} ILIKE '%hourly commitment%'
-            OR {ut_expr} ILIKE '%hourly commitment%'
-            OR {op_expr} ILIKE '%recurring fee%'
-            OR {ut_expr} ILIKE '%recurring fee%'
-            OR {op_expr} ILIKE '%reserved instance fee%'
-            OR {ut_expr} ILIKE '%reserved instance fee%'
-            OR (LOWER(COALESCE(c.product, '')) ILIKE '%savings plan%' AND {text_expr} ILIKE '%hourly commitment%')
-            THEN c.aws_amortized_cost
-          WHEN LOWER(COALESCE(c.pricing_model, '')) = 'spot'
-            OR {ut_expr} ILIKE '%spot%'
-            OR {op_expr} ILIKE '%spot%'
-            THEN c.aws_amortized_cost / {spot_div}
-          WHEN LOWER(COALESCE(c.pricing_model, '')) = 'committed'
-            OR LOWER(COALESCE(c.pricing_model, '')) = 'reserved'
-            OR LOWER(COALESCE(c.line_item_type, '')) = 'discountedusage'
-            OR {ut_expr} ILIKE '%reserved%'
-            OR {op_expr} ILIKE '%reserved%'
-            OR {ut_expr} ILIKE '%savings%plan%'
-            OR {op_expr} ILIKE '%savings%plan%'
-            THEN
-              CASE
-                WHEN REGEXP_MATCHES({text_expr}, '\\b(3-year|36\\s*mo|36\\s*month)\\b|3\\s+yr|3\\s+year|3yr')
-                  THEN c.aws_amortized_cost / {ri3_div}
-                ELSE c.aws_amortized_cost / {ri1_div}
-              END
-          ELSE c.aws_amortized_cost
-        END AS aws_cost_od_est,
+        {od_cost_expr} AS aws_cost_od_est,
+        {od_cost_expr} AS aws_od_cost,
+        {od_basis_expr} AS od_basis,
         CASE
           WHEN LOWER(COALESCE(c.line_item_type, '')) IN ('rifee', 'savingsplanrecurringfee')
             OR {op_expr} ILIKE '%hourly commitment%'
@@ -325,15 +371,15 @@ SELECT  c.aws_li_key, c.product, c.aws_region, c.gcp_region,
         CASE m.strategy
           WHEN 'ignore'         THEN 0
           WHEN 'outlier_triage' THEN NULL
-          WHEN 'passthrough'    THEN CASE WHEN COALESCE(pr.rn, 1) = 1 THEN c.aws_amortized_cost ELSE 0 END
-          WHEN 'needs_reprice'  THEN CASE WHEN COALESCE(pr.rn, 1) = 1 THEN c.aws_amortized_cost ELSE 0 END
+          WHEN 'passthrough'    THEN CASE WHEN COALESCE(pr.rn, 1) = 1 THEN {od_cost_expr} ELSE 0 END
+          WHEN 'needs_reprice'  THEN CASE WHEN COALESCE(pr.rn, 1) = 1 THEN {od_cost_expr} ELSE 0 END
           ELSE c.total_usage * COALESCE(m.unit_multiplier, 1) * od.rate_usd
         END AS gcp_projected_cost,
         CASE m.strategy
           WHEN 'ignore'         THEN 0
           WHEN 'outlier_triage' THEN NULL
-          WHEN 'passthrough'    THEN CASE WHEN COALESCE(pr.rn, 1) = 1 THEN c.aws_amortized_cost ELSE 0 END
-          WHEN 'needs_reprice'  THEN CASE WHEN COALESCE(pr.rn, 1) = 1 THEN c.aws_amortized_cost ELSE 0 END
+          WHEN 'passthrough'    THEN CASE WHEN COALESCE(pr.rn, 1) = 1 THEN {od_cost_expr} ELSE 0 END
+          WHEN 'needs_reprice'  THEN CASE WHEN COALESCE(pr.rn, 1) = 1 THEN {od_cost_expr} ELSE 0 END
           ELSE c.total_usage * COALESCE(m.unit_multiplier, 1) *
                CASE WHEN c.pricing_model = 'Spot'
                     THEN od.rate_usd
@@ -343,8 +389,8 @@ SELECT  c.aws_li_key, c.product, c.aws_region, c.gcp_region,
         CASE m.strategy
           WHEN 'ignore'         THEN 0
           WHEN 'outlier_triage' THEN NULL
-          WHEN 'passthrough'    THEN CASE WHEN COALESCE(pr.rn, 1) = 1 THEN c.aws_amortized_cost ELSE 0 END
-          WHEN 'needs_reprice'  THEN CASE WHEN COALESCE(pr.rn, 1) = 1 THEN c.aws_amortized_cost ELSE 0 END
+          WHEN 'passthrough'    THEN CASE WHEN COALESCE(pr.rn, 1) = 1 THEN {od_cost_expr} ELSE 0 END
+          WHEN 'needs_reprice'  THEN CASE WHEN COALESCE(pr.rn, 1) = 1 THEN {od_cost_expr} ELSE 0 END
           ELSE c.total_usage * COALESCE(m.unit_multiplier, 1) *
                CASE WHEN c.pricing_model = 'Spot'
                     THEN od.rate_usd

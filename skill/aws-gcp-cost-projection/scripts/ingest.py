@@ -43,6 +43,96 @@ from log_utils import get_logger
 from region_prefix import decode_region_prefix
 from aws_normalizer import canonical_service as _canonical_service
 from config_loader import load_data_config as _cfg
+from config_loader import load_assumptions as _load_assumptions
+
+
+def _od_divisor(disc: float) -> float:
+    """(1 - discount) with the same guard projection_view uses: a discount >= 1
+    or a non-positive divisor would blow up the reconstruction, so clamp to 1.0
+    (no reconstruction) in those degenerate cases."""
+    d = (1.0 - disc) if disc < 1.0 else 1.0
+    return d if d > 0 else 1.0
+
+
+def apply_od_basis(conn, assumptions: dict | None = None) -> None:
+    """Stamp aws_od_cost, sp_ri_discount_pct, od_basis on every aws_li_catalog row
+    (WORKORDER_od_vs_od_sp_ri). Single source of truth for the SP/RI/Spot discount
+    rates: the SAME assumptions projection_view reads (config_loader.load_assumptions),
+    so an operator override is honoured here instead of being silently overridden by
+    a hardcoded default that then wins the view's COALESCE(aws_od_cost, ...).
+
+    Basis vocabulary:
+      public_od            - real publicOnDemandCost, or genuine on-demand usage.
+      reconstructed_default- no public OD; reconstructed from a PORTFOLIO-DEFAULT
+                             rate (not a per-SP/RI resolved rate). An estimate, and
+                             labelled so it is distinguishable and countable.
+      amortized_fallback   - no public OD and no applicable rate; aws_od_cost is the
+                             billed amortized cost, untouched. No rate invented.
+    """
+    a = assumptions or _load_assumptions() or {}
+    spot_div = _od_divisor(float(a.get("aws_spot_discount_pct", 0.70)))
+    ri1_div = _od_divisor(float(a.get("aws_ri_1yr_discount_pct", 0.38)))
+    ri3_div = _od_divisor(float(a.get("aws_ri_3yr_discount_pct", 0.52)))
+    spot_pct = float(a.get("aws_spot_discount_pct", 0.70))
+    ri1_pct = float(a.get("aws_ri_1yr_discount_pct", 0.38))
+    ri3_pct = float(a.get("aws_ri_3yr_discount_pct", 0.52))
+
+    _commit_match = (
+        "LOWER(COALESCE(pricing_model, '')) IN ('committed', 'reserved')\n"
+        "             OR LOWER(COALESCE(line_item_type, '')) = 'discountedusage'\n"
+        "             OR LOWER(COALESCE(line_item_type, '')) = 'savingsplancoveredusage'\n"
+        "             OR COALESCE(usage_type, '') ILIKE '%reserved%'\n"
+        "             OR COALESCE(operation, '') ILIKE '%reserved%'\n"
+        "             OR COALESCE(usage_type, '') ILIKE '%savings%plan%'\n"
+        "             OR COALESCE(operation, '') ILIKE '%savings%plan%'"
+    )
+    _spot_match = (
+        "LOWER(COALESCE(pricing_model, '')) = 'spot'\n"
+        "             OR COALESCE(usage_type, '') ILIKE '%spot%'\n"
+        "             OR COALESCE(operation, '') ILIKE '%spot%'"
+    )
+    _is_3yr = ("REGEXP_MATCHES(LOWER(COALESCE(usage_type, '') || ' ' || COALESCE(operation, '')), "
+               "'\\b(3-year|36\\s*mo|36\\s*month)\\b|3\\s+yr|3\\s+year|3yr')")
+
+    conn.execute(f"""
+        UPDATE aws_li_catalog
+        SET
+            aws_od_cost = CASE
+                WHEN public_on_demand_cost IS NOT NULL AND public_on_demand_cost > 0
+                    THEN public_on_demand_cost
+                WHEN LOWER(COALESCE(pricing_model, '')) = 'ondemand' AND LOWER(COALESCE(line_item_type, '')) = 'usage'
+                    THEN aws_amortized_cost
+                WHEN {_spot_match}
+                    THEN CASE WHEN aws_amortized_cost > 0 THEN aws_amortized_cost / {spot_div} ELSE aws_amortized_cost END
+                WHEN {_commit_match}
+                    THEN CASE WHEN aws_amortized_cost > 0
+                              THEN aws_amortized_cost / CASE WHEN {_is_3yr} THEN {ri3_div} ELSE {ri1_div} END
+                              ELSE aws_amortized_cost END
+                ELSE aws_amortized_cost
+            END,
+            sp_ri_discount_pct = CASE
+                WHEN public_on_demand_cost IS NOT NULL AND public_on_demand_cost > aws_amortized_cost AND public_on_demand_cost > 0
+                    THEN (public_on_demand_cost - aws_amortized_cost) / public_on_demand_cost
+                WHEN LOWER(COALESCE(pricing_model, '')) = 'ondemand' AND LOWER(COALESCE(line_item_type, '')) = 'usage'
+                    THEN 0.0
+                WHEN {_spot_match}
+                    THEN {spot_pct}
+                WHEN {_commit_match}
+                    THEN CASE WHEN {_is_3yr} THEN {ri3_pct} ELSE {ri1_pct} END
+                ELSE 0.0
+            END,
+            od_basis = CASE
+                WHEN public_on_demand_cost IS NOT NULL AND public_on_demand_cost > 0
+                    THEN 'public_od'
+                WHEN LOWER(COALESCE(pricing_model, '')) = 'ondemand' AND LOWER(COALESCE(line_item_type, '')) = 'usage'
+                    THEN 'public_od'
+                WHEN {_spot_match}
+                    THEN 'reconstructed_default'
+                WHEN {_commit_match}
+                    THEN 'reconstructed_default'
+                ELSE 'amortized_fallback'
+            END
+    """)
 try:
     from diagnostics import diag, WARN
 except ImportError:
@@ -1368,7 +1458,11 @@ def main():
             product_code VARCHAR,
             billing_month VARCHAR,
             aws_amortized_cost_native DOUBLE,
-            currency VARCHAR
+            currency VARCHAR,
+            public_on_demand_cost DOUBLE,
+            aws_od_cost DOUBLE,
+            sp_ri_discount_pct DOUBLE,
+            od_basis VARCHAR
         )
     """)
     # product_code (= CUR lineItem/ProductCode) is the authoritative stable key
@@ -1378,6 +1472,10 @@ def main():
     conn.execute("ALTER TABLE aws_li_catalog ADD COLUMN IF NOT EXISTS billing_month VARCHAR")
     conn.execute("ALTER TABLE aws_li_catalog ADD COLUMN IF NOT EXISTS aws_amortized_cost_native DOUBLE")
     conn.execute("ALTER TABLE aws_li_catalog ADD COLUMN IF NOT EXISTS currency VARCHAR")
+    conn.execute("ALTER TABLE aws_li_catalog ADD COLUMN IF NOT EXISTS public_on_demand_cost DOUBLE")
+    conn.execute("ALTER TABLE aws_li_catalog ADD COLUMN IF NOT EXISTS aws_od_cost DOUBLE")
+    conn.execute("ALTER TABLE aws_li_catalog ADD COLUMN IF NOT EXISTS sp_ri_discount_pct DOUBLE")
+    conn.execute("ALTER TABLE aws_li_catalog ADD COLUMN IF NOT EXISTS od_basis VARCHAR")
 
     # Reconcile sum helper
     if is_raw_cur:
@@ -1470,6 +1568,10 @@ def main():
                          THEN {_sql_num(gross_col)}
                          ELSE {_sql_num(cost_col)}
                     END as row_cost,
+                    CASE WHEN {c(['pricing/publicondemandcost', 'publicondemandcost'])} != 'NULL'
+                         THEN {_sql_num(c(['pricing/publicondemandcost', 'publicondemandcost']))}
+                         ELSE NULL
+                    END as row_public_od,
                     COALESCE({c(['product/licensemodel', 'licensemodel'])}, '') as license_model,
                     COALESCE({c(['product/operatingsystem', 'operatingsystem'])}, '') as operating_system,
                     COALESCE({c(['product/databaseengine', 'databaseengine'])}, '') as database_engine,
@@ -1500,6 +1602,7 @@ def main():
             INSERT INTO aws_li_catalog (
                 aws_li_key, product, usage_type, operation, aws_region, gcp_region,
                 pricing_model, line_item_type, is_workload, total_usage, aws_amortized_cost,
+                public_on_demand_cost,
                 license_model, operating_system, database_engine, deployment_option, volume_type, pricing_unit,
                 product_code, billing_month
             )
@@ -1508,6 +1611,7 @@ def main():
                 product, usage_type, operation, aws_region, NULL as gcp_region, pricing_model, line_item_type, is_workload,
                 SUM(row_usage) as total_usage,
                 SUM(row_cost) as aws_amortized_cost,
+                SUM(row_public_od) as public_on_demand_cost,
                 license_model, operating_system, database_engine, deployment_option, volume_type, pricing_unit,
                 -- product_code is functionally constant within a dedup group (it is
                 -- 1:1 with product); carried via max() so it is NOT part of the md5
@@ -2156,8 +2260,9 @@ def main():
     conn.execute("UPDATE aws_li_catalog SET aws_amortized_cost_native = aws_amortized_cost, currency = ?", [curr_code])
 
     if curr_code != "USD" and fx_rate > 0:
-        # Convert native currency to USD in aws_amortized_cost
+        # Convert native currency to USD in aws_amortized_cost and public_on_demand_cost
         conn.execute("UPDATE aws_li_catalog SET aws_amortized_cost = aws_amortized_cost / ?", [fx_rate])
+        conn.execute("UPDATE aws_li_catalog SET public_on_demand_cost = public_on_demand_cost / ? WHERE public_on_demand_cost IS NOT NULL", [fx_rate])
         # Update currency_info to mark that aws_cost_currency in the DB is now USD
         _currency_info["aws_cost_currency"] = "USD"
         _currency_info["aws_fx_rate"] = fx_rate
@@ -2167,6 +2272,9 @@ def main():
             f"at rate {fx_rate:g} ({_currency_info.get('label', '')}). Native amounts stored in "
             f"aws_amortized_cost_native; internal pipeline runs purely in USD."
         )
+
+    # 4c. OD-vs-OD Comparison (WORKORDER_od_vs_od_sp_ri). See apply_od_basis().
+    apply_od_basis(conn)
 
     # 5. Map Regions
     catalog_rows = conn.execute("SELECT aws_li_key, aws_region, usage_type FROM aws_li_catalog").fetchall()

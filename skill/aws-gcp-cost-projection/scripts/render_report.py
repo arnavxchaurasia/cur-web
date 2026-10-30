@@ -977,15 +977,19 @@ def main():
     _has_assumption = "is_assumption" in _m2g_cols
     _assumption_expr = "BOOL_OR(COALESCE(m.is_assumption, FALSE))" if _has_assumption else "FALSE"
 
+    _c_cols = {r[1].lower() for r in conn.execute("PRAGMA table_info('aws_li_catalog')").fetchall()}
     _p_cols = {r[1].lower() for r in conn.execute("PRAGMA table_info('gcp_projection')").fetchall()}
     _commitment_basis_expr = (
         "COALESCE(ANY_VALUE(p.commitment_basis), 'on_demand')" if "commitment_basis" in _p_cols
         else "'on_demand'"
     )
-    _aws_cost_od_est_expr = (
-        f"COALESCE(ANY_VALUE(p.aws_cost_od_est), c.aws_amortized_cost) * {aws_fx_rate}" if "aws_cost_od_est" in _p_cols
-        else f"c.aws_amortized_cost * {aws_fx_rate}"
-    )
+    _c_od_val = "c.aws_od_cost" if "aws_od_cost" in _c_cols else "c.aws_amortized_cost"
+    _p_od_val = "ANY_VALUE(p.aws_od_cost)" if "aws_od_cost" in _p_cols else ("ANY_VALUE(p.aws_cost_od_est)" if "aws_cost_od_est" in _p_cols else _c_od_val)
+    _aws_cost_od_est_expr = f"COALESCE({_p_od_val}, {_c_od_val}, c.aws_amortized_cost) * {aws_fx_rate}"
+
+    _c_basis_val = "ANY_VALUE(c.od_basis)" if "od_basis" in _c_cols else "'amortized_fallback'"
+    _p_basis_val = "ANY_VALUE(p.od_basis)" if "od_basis" in _p_cols else _c_basis_val
+    _od_basis_expr = f"COALESCE({_p_basis_val}, {_c_basis_val}, 'amortized_fallback')"
 
     rows = conn.execute(f"""
         SELECT
@@ -1011,7 +1015,8 @@ def main():
             SUM(CASE WHEN m.component IN ('license', 'sql_license') THEN p.gcp_projected_cost ELSE 0.0 END) * {fx_rate} AS gcp_lic_od,
             STRING_AGG(DISTINCT CASE WHEN m.component IN ('license', 'sql_license') THEN COALESCE(NULLIF(m.gcp_sku_name, ''), m.component) ELSE NULL END, ', ') AS lic_name,
             {_commitment_basis_expr}                                           AS commitment_basis,
-            {_aws_cost_od_est_expr}                                            AS aws_cost_od_est
+            {_aws_cost_od_est_expr}                                            AS aws_cost_od_est,
+            {_od_basis_expr}                                                   AS od_basis
         FROM aws_li_catalog c
         LEFT JOIN aws_li_to_gcp_li m ON c.aws_li_key = m.aws_li_key
         LEFT JOIN gcp_projection    p ON c.aws_li_key = p.aws_li_key
@@ -1221,7 +1226,7 @@ def main():
     sec_b_rows = []
 
     for r in rows:
-        product, operation, gcp_svc, strategy, notes, aws, od, cud1, cud3, aws_region, gcp_region, is_wl, pricing_model, instance_type, gcp_sku_name, gcp_machine_type, is_assump, aws_li_key, gcp_base_od, gcp_lic_od, lic_name, commitment_basis, aws_cost_od_est = r
+        product, operation, gcp_svc, strategy, notes, aws, od, cud1, cud3, aws_region, gcp_region, is_wl, pricing_model, instance_type, gcp_sku_name, gcp_machine_type, is_assump, aws_li_key, gcp_base_od, gcp_lic_od, lic_name, commitment_basis, aws_cost_od_est, od_basis = r
         if (aws or 0.0) < 0:
             continue
 
@@ -1233,7 +1238,7 @@ def main():
             sec_b_rows.append(r)
 
     def _render_row(r, idx, force_pt=False, active_columns=None):
-        product, operation, gcp_svc, strategy, notes, aws, od, cud1, cud3, aws_region, gcp_region, is_wl, pricing_model, instance_type, gcp_sku_name, gcp_machine_type, is_assump, aws_li_key, gcp_base_od, gcp_lic_od, lic_name, commitment_basis, aws_cost_od_est = r
+        product, operation, gcp_svc, strategy, notes, aws, od, cud1, cud3, aws_region, gcp_region, is_wl, pricing_model, instance_type, gcp_sku_name, gcp_machine_type, is_assump, aws_li_key, gcp_base_od, gcp_lic_od, lic_name, commitment_basis, aws_cost_od_est, od_basis = r
 
         ptype  = pill_type(gcp_svc, product)
         p_html = pill_html(ptype)
@@ -1243,10 +1248,12 @@ def main():
         is_ignore = (strategy == "ignore")
         is_pt = force_pt or (strategy == "passthrough") or (od is None and not is_ignore)
 
+        cmp_aws = aws_od_est
+
         if force_pt:
-            od = aws
-            cud1 = aws
-            cud3 = aws
+            od = cmp_aws
+            cud1 = cmp_aws
+            cud3 = cmp_aws
             has_od = True
             has_cud1 = True
             has_cud3 = True
@@ -1285,9 +1292,12 @@ def main():
 
         why_html, cost_tier_html = _format_why_html(notes)
 
+        basis_tag = f' <span class="basis-tag" style="font-size:10px;color:#5F6368" title="OD basis: {_html.escape(str(od_basis))}">[{_html.escape(str(od_basis))}]</span>' if od_basis else ""
+
         desc_html = f'<div class="desc">'
         if op_str:
             desc_html += op_str
+        desc_html += basis_tag
         desc_html += '</div>'
         desc_html += why_html
         desc_html += cost_tier_html
@@ -1295,7 +1305,6 @@ def main():
         has_license_modeled = (gcp_lic_od is not None and gcp_lic_od > 0.005 and bool(lic_name) and not is_pt and not is_ignore)
 
         is_estimated_od = (commitment_basis != "on_demand" and abs(aws_od_est - aws) > 0.005)
-        cmp_aws = aws_od_est if is_estimated_od else aws
 
         if is_ignore:
             od_str   = fmt(0.0)
@@ -1303,9 +1312,9 @@ def main():
             cud3_str = fmt(0.0)
             diff_td  = f'<td class="num green">+{fmt(cmp_aws)}</td>' if cmp_aws > 0.005 else '<td class="num">—</td>'
         elif is_pt:
-            od_str = fmt(aws)
-            cud1_str = fmt(aws)
-            cud3_str = fmt(aws)
+            od_str = fmt(cmp_aws)
+            cud1_str = fmt(cmp_aws)
+            cud3_str = fmt(cmp_aws)
             diff_td = '<td class="num">—</td>'
         elif not has_od:
             od_str   = '—'
@@ -1418,9 +1427,9 @@ def main():
             return f'<td class="extra-col">{desc_html}</td>'
 
         def cell_pct():
-            if not aws:
+            if not cmp_aws:
                 return "<td class='num'>—</td>"
-            pct = (od / aws * 100) if aws > 0 else 0
+            pct = (od / cmp_aws * 100) if cmp_aws > 0 else 0
             color = "#137333" if pct <= 100 else "#D93025"
             return f"<td class='num' style='color:{color};font-weight:500'>{pct:.0f}%</td>"
 
@@ -1597,10 +1606,11 @@ def main():
 
     for r in sec_b_rows:
         aws = r[5] or 0.0
-        sec_b_aws += aws
-        sec_b_gcp_od += aws
-        sec_b_gcp_1yr += aws
-        sec_b_gcp_3yr += aws
+        aws_od_est = r[22] if r[22] is not None else aws
+        sec_b_aws += aws_od_est
+        sec_b_gcp_od += aws_od_est
+        sec_b_gcp_1yr += aws_od_est
+        sec_b_gcp_3yr += aws_od_est
         sec_b_html += _render_row(r, idx, force_pt=True, active_columns=_ACTIVE_COLUMNS)
         idx += 1
 
@@ -1916,6 +1926,24 @@ def main():
                     _parts.append(
                         f"The remaining {fmt(_other * aws_fx_rate)} is included in the "
                         "totals above at its AWS cost.")
+
+                # OD basis fallback disclosure (WORKORDER_od_vs_od_sp_ri)
+                fb_cnt = sum(1 for r in rows if r[23] == 'amortized_fallback')
+                if fb_cnt > 0:
+                    fb_spend = sum((r[5] or 0.0) for r in rows if r[23] == 'amortized_fallback')
+                    _parts.append(
+                        f"Note: {fb_cnt} line item(s) totalling {fmt(fb_spend)} had no resolvable public On-Demand rate or commitment discount and fell back to billed amortized cost (amortized_fallback)."
+                    )
+                # Reconstructed-from-default-rate disclosure: these carry an ESTIMATED
+                # OD cost built from a portfolio-default SP/RI/Spot discount, not a
+                # per-commitment resolved rate, so the AWS OD side is an estimate.
+                rd_cnt = sum(1 for r in rows if r[23] == 'reconstructed_default')
+                if rd_cnt > 0:
+                    rd_spend = sum((r[5] or 0.0) for r in rows if r[23] == 'reconstructed_default')
+                    _parts.append(
+                        f"Note: {rd_cnt} line item(s) totalling {fmt(rd_spend)} had no public On-Demand rate; their AWS On-Demand cost was reconstructed from the configured default SP/RI/Spot discount (reconstructed_default) and is an estimate."
+                    )
+
                 coverage_block = (
                     '<h2>Coverage</h2>'
                     '<p class="section-meta">' + " ".join(_parts) + '</p>'
