@@ -541,7 +541,10 @@ func phaseSpecs(inputExt string) []phaseSpec {
 				"?scripts/final_mapping_sanity_check.py $DB",
 			},
 			Script:        "scripts/render_report.py",
-			PostLLMScripts: []string{"?scripts/run_diag_summary.py $JOBDIR"},
+			PostLLMScripts: []string{
+				"?scripts/run_diag_summary.py $JOBDIR",
+				"?scripts/advisory_reviewer.py $JOBDIR",
+			},
 		},
 	}
 }

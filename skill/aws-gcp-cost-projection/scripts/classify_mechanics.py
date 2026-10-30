@@ -40,6 +40,12 @@ except (ImportError, ModuleNotFoundError):  # pragma: no cover
     def diag(*a, **k): pass
     WARN = "warn"
 
+try:
+    from refresh_store import get_trusted_mapping, load_refresh_store
+except (ImportError, ModuleNotFoundError):
+    def get_trusted_mapping(*_a, **_k): return None
+    def load_refresh_store(*_a, **_k): return {"mappings": {}}
+
 _svc_cfg = _cfg("service-classification")
 
 # Groups resolved deterministically by apply_commitment_ignores.py /
@@ -1864,18 +1870,65 @@ def main():
             continue
         if g == "misc":
             processed_rows = []
+            refresh_mapped = []
+            # Load the refresh store ONCE for the whole misc bucket; each row does
+            # up to 4 lookups, so re-reading the file per lookup would be O(4N)
+            # disk reads. get_trusted_mapping takes the preloaded store.
+            _rstore = load_refresh_store()
             for r in rows:
-                r_copy = dict(r)
-                r_copy["field_state"] = annotate_misc_field_state(r_copy)
-                processed_rows.append(r_copy)
+                trusted = None
+                canon = r.get("canonical")
+                if not canon and r.get("product"):
+                    canon = canonical_service(r.get("product"), r.get("product_code"))
+                if canon:
+                    trusted = get_trusted_mapping(canon, store=_rstore)
+                if not trusted and r.get("product"):
+                    clean_prod = r.get("product", "").lower().replace("amazon ", "").replace("aws ", "").strip()
+                    trusted = get_trusted_mapping(clean_prod, store=_rstore)
+                if not trusted and r.get("product"):
+                    trusted = get_trusted_mapping(r.get("product"), store=_rstore)
+                if not trusted and r.get("product_code"):
+                    trusted = get_trusted_mapping(r.get("product_code"), store=_rstore)
+
+                if trusted:
+                    refresh_mapped.append({
+                        "aws_li_key": r["aws_li_key"],
+                        "gcp_service": trusted.get("gcp_service", "Manual Review"),
+                        "gcp_sku_name": trusted.get("gcp_sku_name", ""),
+                        "gcp_sku_id": trusted.get("gcp_sku_id", ""),
+                        "strategy": trusted.get("strategy", "map"),
+                        "component": None,
+                        "unit_multiplier": trusted.get("unit_multiplier", 1.0),
+                        "gcp_region": r.get("gcp_region"),
+                        "projection_note": f"[refresh_store: trusted fact, {trusted.get('confirmation_count', 1)} confirmation(s)]",
+                        "mapping_confidence": 1.0,
+                        "is_workload": True,
+                        "break_down": False,
+                        "decided_by": "refresh_store",
+                    })
+                else:
+                    r_copy = dict(r)
+                    r_copy["field_state"] = annotate_misc_field_state(r_copy)
+                    processed_rows.append(r_copy)
+
+            if refresh_mapped:
+                out_mappings_dir = os.path.join(os.path.dirname(db_path), "mappings")
+                os.makedirs(out_mappings_dir, exist_ok=True)
+                rf_path = os.path.join(out_mappings_dir, "refresh_mappings.json")
+                try:
+                    with open(rf_path, "w", encoding="utf-8") as f:
+                        json.dump(refresh_mapped, f, indent=2)
+                    print(f"refresh_store: applied {len(refresh_mapped)} trusted mapping(s) -> {rf_path}")
+                except Exception as _e:
+                    print(f"refresh_store: failed to write {rf_path}: {_e}", file=sys.stderr)
         else:
             processed_rows = _drop_null_cols(rows)
 
         manifest_out[g] = {
             "rows": processed_rows,
-            "row_count": len(rows),
-            "total_spend": sum(r.get("aws_amortized_cost") or 0 for r in rows),
-            "needs_llm": True,
+            "row_count": len(processed_rows),
+            "total_spend": sum(r.get("aws_amortized_cost") or 0 for r in processed_rows),
+            "needs_llm": len(processed_rows) > 0,
         }
 
     # Add output_dir so the LLM knows exactly where to write mapping files.

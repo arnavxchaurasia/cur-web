@@ -268,6 +268,25 @@ func Open(path string, remoteURL ...string) (*DB, error) {
 			recorded_at   DATETIME DEFAULT (datetime('now')),
 			PRIMARY KEY (job_id, run_id)
 		)`,
+		`CREATE TABLE IF NOT EXISTS review_findings (
+			id                TEXT PRIMARY KEY,
+			job_id            TEXT NOT NULL,
+			aws_li_key        TEXT NOT NULL,
+			canonical_service TEXT NOT NULL,
+			charge_type       TEXT NOT NULL,
+			finding_type      TEXT NOT NULL,
+			severity          TEXT NOT NULL,
+			aws_od            REAL NOT NULL DEFAULT 0.0,
+			gcp_od            REAL NOT NULL DEFAULT 0.0,
+			ratio             REAL NOT NULL DEFAULT 0.0,
+			evidence_json     TEXT NOT NULL,
+			suggested_action  TEXT NOT NULL,
+			status            TEXT NOT NULL DEFAULT 'pending',
+			action_note       TEXT,
+			resolved_by       TEXT,
+			resolved_at       DATETIME,
+			created_at        DATETIME DEFAULT (datetime('now'))
+		)`,
 	} {
 		if _, err := conn.Exec(ddl); err != nil {
 			msg := err.Error()

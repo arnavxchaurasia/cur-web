@@ -1664,3 +1664,222 @@ func (h *Handler) AdminPreviewUploadedBill(w http.ResponseWriter, r *http.Reques
 	})
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Admin: Review findings triage & self-healing refresh loop
+// ─────────────────────────────────────────────────────────────────────────
+
+// AdminListFindings lists review findings across all jobs or for a specific job.
+// Query params: job_id, service, severity, status, limit, offset.
+func (h *Handler) AdminListFindings(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	jobID := chi.URLParam(r, "id")
+	if jobID == "" {
+		jobID = q.Get("job_id")
+	}
+	service := q.Get("service")
+	severity := q.Get("severity")
+	status := q.Get("status")
+
+	limit := 100
+	if v := q.Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 500 {
+			limit = n
+		}
+	}
+	offset := 0
+	if v := q.Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+
+	findings, total, err := h.db.ListReviewFindings(jobID, service, severity, status, limit, offset)
+	if err != nil {
+		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
+		return
+	}
+	if findings == nil {
+		findings = []db.ReviewFinding{}
+	}
+
+	w.Header().Set(contentTypeHeader, contentTypeJSON)
+	json.NewEncoder(w).Encode(map[string]any{
+		"findings": findings,
+		"total":    total,
+		"limit":    limit,
+		"offset":   offset,
+	})
+}
+
+// AdminActionFinding updates a finding status: accept | reject | defer.
+// On 'accept', it promotes the fact into the refresh store (data/refresh_store.json).
+func (h *Handler) AdminActionFinding(w http.ResponseWriter, r *http.Request) {
+	sess := auth.SessionFromCtx(r.Context())
+	findingID := chi.URLParam(r, "id")
+	if findingID == "" {
+		http.Error(w, `{"error":"missing finding id"}`, http.StatusBadRequest)
+		return
+	}
+
+	var body struct {
+		Action      string  `json:"action"` // accept | reject | defer
+		Note        string  `json:"note"`
+		GCPService  string  `json:"gcp_service,omitempty"`
+		GCPSKUName  string  `json:"gcp_sku_name,omitempty"`
+		GCPSKUID    string  `json:"gcp_sku_id,omitempty"`
+		Strategy    string  `json:"strategy,omitempty"`
+		Multiplier  float64 `json:"unit_multiplier,omitempty"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		return
+	}
+
+	action := strings.ToLower(strings.TrimSpace(body.Action))
+	if action != "accept" && action != "reject" && action != "defer" {
+		http.Error(w, `{"error":"invalid action; must be accept, reject, or defer"}`, http.StatusBadRequest)
+		return
+	}
+
+	finding, err := h.db.GetReviewFindingByID(findingID)
+	if err != nil {
+		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
+		return
+	}
+	if finding == nil {
+		http.Error(w, `{"error":"finding not found"}`, http.StatusNotFound)
+		return
+	}
+
+	status := "pending"
+	switch action {
+	case "accept":
+		status = "accepted"
+	case "reject":
+		status = "rejected"
+	case "defer":
+		status = "deferred"
+	}
+
+	if err := h.db.UpdateReviewFindingAction(findingID, status, body.Note, sess.Email); err != nil {
+		http.Error(w, `{"error":"failed to update finding"}`, http.StatusInternalServerError)
+		return
+	}
+
+	// If accepted, promote to refresh store!
+	if action == "accept" {
+		targetService := body.GCPService
+		if targetService == "" && finding.Evidence != nil {
+			if s, ok := finding.Evidence["gcp_service"].(string); ok {
+				targetService = s
+			}
+		}
+		targetSKUName := body.GCPSKUName
+		if targetSKUName == "" && finding.Evidence != nil {
+			if s, ok := finding.Evidence["gcp_sku_name"].(string); ok {
+				targetSKUName = s
+			}
+		}
+		targetSKUID := body.GCPSKUID
+		if targetSKUID == "" && finding.Evidence != nil {
+			if s, ok := finding.Evidence["gcp_sku_id"].(string); ok {
+				targetSKUID = s
+			}
+		}
+		strat := body.Strategy
+		if strat == "" {
+			strat = "map"
+		}
+		mult := body.Multiplier
+		if mult <= 0 {
+			mult = 1.0
+		}
+
+		key := finding.CanonicalService
+		if key == "" || key == "unknown" {
+			if p, ok := finding.Evidence["product"].(string); ok && p != "" {
+				key = p
+			}
+		}
+
+		if key != "" && targetService != "" {
+			h.promoteFindingToRefreshStore(key, targetService, targetSKUName, targetSKUID, strat, mult, sess.Email)
+		}
+	}
+
+	_ = h.db.LogAdminAction(sess.Email, "finding_"+action, findingID, body.Note)
+
+	w.Header().Set(contentTypeHeader, contentTypeJSON)
+	json.NewEncoder(w).Encode(map[string]any{
+		"id":     findingID,
+		"status": status,
+		"action": action,
+	})
+}
+
+// promoteFindingToRefreshStore calls python refresh_store.py or updates refresh_store.json.
+func (h *Handler) promoteFindingToRefreshStore(key, gcpService, gcpSKUName, gcpSKUID, strategy string, multiplier float64, user string) {
+	skillDir := skill.ResolveDir()
+	storePath := filepath.Join(skillDir, "data", "refresh_store.json")
+
+	type StoreEntry struct {
+		GCPService        string   `json:"gcp_service"`
+		GCPSKUName        string   `json:"gcp_sku_name"`
+		GCPSKUID          string   `json:"gcp_sku_id"`
+		Strategy          string   `json:"strategy"`
+		UnitMultiplier    float64  `json:"unit_multiplier"`
+		ConfirmationCount int      `json:"confirmation_count"`
+		Status            string   `json:"status"`
+		LastConfirmedAt   string   `json:"last_confirmed_at"`
+		Sources           []string `json:"sources"`
+	}
+
+	type RefreshStoreDoc struct {
+		Version      string                `json:"version"`
+		UpdatedAt    string                `json:"updated_at"`
+		Mappings     map[string]StoreEntry `json:"mappings"`
+		ProductCodes map[string]any        `json:"product_codes"`
+		Rates        map[string]any        `json:"rates"`
+	}
+
+	var doc RefreshStoreDoc
+	data, err := os.ReadFile(storePath)
+	if err == nil {
+		_ = json.Unmarshal(data, &doc)
+	}
+	if doc.Mappings == nil {
+		doc.Mappings = make(map[string]StoreEntry)
+	}
+	if doc.Version == "" {
+		doc.Version = "1.0.0"
+	}
+	doc.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+
+	cleanKey := strings.ToLower(strings.TrimSpace(key))
+	entry, exists := doc.Mappings[cleanKey]
+	count := 1
+	sources := []string{user}
+	if exists {
+		count = entry.ConfirmationCount + 1
+		sources = append(entry.Sources, user)
+	}
+
+	doc.Mappings[cleanKey] = StoreEntry{
+		GCPService:        gcpService,
+		GCPSKUName:        gcpSKUName,
+		GCPSKUID:          gcpSKUID,
+		Strategy:          strategy,
+		UnitMultiplier:    multiplier,
+		ConfirmationCount: count,
+		Status:            "trusted", // admin accepted
+		LastConfirmedAt:   time.Now().UTC().Format(time.RFC3339),
+		Sources:           sources,
+	}
+
+	if out, err := json.MarshalIndent(doc, "", "  "); err == nil {
+		_ = os.WriteFile(storePath, out, 0644)
+	}
+}
+
+

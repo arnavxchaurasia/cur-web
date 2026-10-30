@@ -19,7 +19,13 @@ import duckdb
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from synthetic_skus import SYNTHETIC_SKU_IDS
-from unit_equivalence import unit_class
+from unit_equivalence import unit_class, compatible, unit_dims
+
+try:
+    from diagnostics import diag, WARN
+except Exception:
+    def diag(*args, **kwargs): pass
+    WARN = "warn"
 
 _SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 _SKILL_DIR = os.environ.get("SKILL_DIR", os.path.dirname(_SCRIPTS_DIR))
@@ -335,28 +341,24 @@ def resolve_intent_to_sku(
             exp_unit = None
 
         if exp_unit:
-            res_cls = unit_class(resolved_unit)
-            exp_cls = unit_class(exp_unit)
-
-            if res_cls is not None and exp_cls is not None:
-                if res_cls != exp_cls:
-                    # Dimensional mismatch: REJECT
-                    return ResolvedSKU(
-                        None,
-                        None,
-                        f"[unit-mismatch: SKU billed per '{resolved_unit}' ({res_cls}), "
-                        f"mapper assumed '{exp_unit}' ({exp_cls}) — passthrough]",
-                    )
-                # Same unit class -> accept
-                return ResolvedSKU(resolved_sku_id, resolved_unit, None)
-            else:
-                # Unknown class on either side -> accept with unverified note
-                note_reason = f"SKU unit '{resolved_unit}', assumed '{exp_unit}'"
-                return ResolvedSKU(
-                    resolved_sku_id,
-                    resolved_unit,
-                    f"[unit-unverified: {note_reason}]",
+            ok, why = compatible(resolved_unit, exp_unit)
+            if not ok:
+                code = "unit_unknown" if "unknown unit" in why else "unit_mismatch"
+                diag(
+                    WARN,
+                    code,
+                    "resolve_sku.py",
+                    f"Unit rejection: {why} (resolved SKU={resolved_sku_id} unit={resolved_unit}, expected={exp_unit})",
+                    detail={"resolved_sku": resolved_sku_id, "resolved_unit": resolved_unit, "expected_unit": exp_unit, "why": why},
                 )
+                # Dimensional mismatch or unknown unit: REJECT (G-1b)
+                return ResolvedSKU(
+                    None,
+                    None,
+                    f"[unit-mismatch: {why} — passthrough]",
+                )
+            # Compatible dimensions -> accept
+            return ResolvedSKU(resolved_sku_id, resolved_unit, None)
 
         return ResolvedSKU(resolved_sku_id, resolved_unit, None)
 

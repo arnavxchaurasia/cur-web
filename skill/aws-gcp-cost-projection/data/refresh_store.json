@@ -1,0 +1,10 @@
+{
+  "version": "1.0.0",
+  "updated_at": "2026-10-30T00:00:00Z",
+  "_meta": {
+    "description": "Versioned, self-healing store of confirmed mappings, learned product codes, and confirmed rates. Grows across bills; short-circuits LLM when status is 'trusted'."
+  },
+  "mappings": {},
+  "product_codes": {},
+  "rates": {}
+}

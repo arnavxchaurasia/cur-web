@@ -227,6 +227,7 @@ func (w *Watcher) finalize(jobID string, allowRetry bool, logOffset int64) {
 			log.Printf("watcher %s: UpdateJobDoneWithGCPOD: %v", jobID, err)
 		}
 		w.recordEquivalenceUsage(jobID, jobDir)
+		w.recordReviewFindings(jobID, jobDir)
 		metrics.JobsDone.Add(1)
 		slog.Info("job done", "job_id", jobID, "prospect", job.Prospect, "aws_spend", spend, "gcp_od", gcpOD, "attempts", job.Attempts)
 
@@ -604,6 +605,85 @@ func (w *Watcher) recordEquivalenceUsage(jobID, jobDir string) {
 		slog.Error("failed to record equivalence usage to db", "job_id", jobID, "err", err)
 	} else {
 		slog.Info("recorded equivalence usage to db", "job_id", jobID, "count", len(records))
+	}
+}
+
+func (w *Watcher) recordReviewFindings(jobID, jobDir string) {
+	findingsFile := filepath.Join(jobDir, "projection-audit", "review_findings.json")
+	if _, err := os.Stat(findingsFile); os.IsNotExist(err) {
+		findingsFile = filepath.Join(jobDir, "review_findings.json")
+		if _, err := os.Stat(findingsFile); os.IsNotExist(err) {
+			return
+		}
+	}
+
+	if w.db == nil {
+		return
+	}
+
+	data, err := os.ReadFile(findingsFile)
+	if err != nil {
+		slog.Warn("failed to read review_findings.json", "job_id", jobID, "err", err)
+		return
+	}
+
+	var rawFindings []struct {
+		JobID            string         `json:"job_id"`
+		AWSLIKey         string         `json:"aws_li_key"`
+		CanonicalService string         `json:"canonical_service"`
+		ChargeType       string         `json:"charge_type"`
+		FindingType      string         `json:"finding_type"`
+		Severity         string         `json:"severity"`
+		Evidence         map[string]any `json:"evidence"`
+		SuggestedAction  string         `json:"suggested_action"`
+	}
+
+	if err := json.Unmarshal(data, &rawFindings); err != nil {
+		slog.Warn("failed to unmarshal review_findings.json", "job_id", jobID, "err", err)
+		return
+	}
+
+	var dbFindings []db.ReviewFinding
+	for _, rf := range rawFindings {
+		jid := rf.JobID
+		if jid == "" {
+			jid = jobID
+		}
+		var awsOD, gcpOD, ratio float64
+		if rf.Evidence != nil {
+			if v, ok := rf.Evidence["aws_od"].(float64); ok {
+				awsOD = v
+			}
+			if v, ok := rf.Evidence["gcp_od"].(float64); ok {
+				gcpOD = v
+			}
+			if v, ok := rf.Evidence["ratio"].(float64); ok {
+				ratio = v
+			}
+		}
+		evBytes, _ := json.Marshal(rf.Evidence)
+
+		dbFindings = append(dbFindings, db.ReviewFinding{
+			JobID:            jid,
+			AWSLIKey:         rf.AWSLIKey,
+			CanonicalService: rf.CanonicalService,
+			ChargeType:       rf.ChargeType,
+			FindingType:      rf.FindingType,
+			Severity:         rf.Severity,
+			AWSOD:            awsOD,
+			GCPOD:            gcpOD,
+			Ratio:            ratio,
+			EvidenceJSON:     string(evBytes),
+			Evidence:         rf.Evidence,
+			SuggestedAction:  rf.SuggestedAction,
+			Status:           "pending",
+		})
+	}
+
+	if err := w.db.SaveReviewFindings(dbFindings); err != nil {
+		slog.Error("failed to save review findings to db", "job_id", jobID, "err", err)
+	} else {
+		slog.Info("saved review findings to db", "job_id", jobID, "count", len(dbFindings))
 	}
 }
 

@@ -128,7 +128,7 @@ def test_section_g1b_unit_validation_rejection_and_unverified():
     assert res_mismatch.unit is None
     assert "[unit-mismatch:" in res_mismatch.note
 
-    # 3. Unknown unit class (expected 'widgets', SKU billed per 'widgets' -> accept with [unit-unverified])
+    # 3. Unknown unit class (expected 'widgets', SKU billed per 'widgets' -> fails closed with [unit-mismatch: unknown unit])
     res_unverified = resolve_sku.resolve_intent_to_sku(
         gcp_service="Compute Engine",
         gcp_sku_name="Custom Metric Widget",
@@ -136,8 +136,9 @@ def test_section_g1b_unit_validation_rejection_and_unverified():
         expected_unit="widgets",
         conn=mock_cat,
     )
-    assert res_unverified.sku_id == "SKU-SPECIAL-CUSTOM"
-    assert "[unit-unverified:" in res_unverified.note
+    assert res_unverified.sku_id is None
+    assert res_unverified.unit is None
+    assert "[unit-mismatch: unknown unit 'widgets'" in res_unverified.note
 
     mock_cat.close()
 

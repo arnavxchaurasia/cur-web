@@ -298,6 +298,10 @@ func main() {
 			r.Put("/api/admin/tickets/{id}", jobHandler.AdminUpdateTicket)
 			// Admin notifications feed (job completions + raised tickets)
 			r.Get("/api/admin/notifications", jobHandler.AdminNotifications)
+			// Review findings triage & self-healing refresh loop
+			r.Get("/api/admin/findings", jobHandler.AdminListFindings)
+			r.Get("/api/admin/jobs/{id}/findings", jobHandler.AdminListFindings)
+			r.Post("/api/admin/findings/{id}/action", jobHandler.AdminActionFinding)
 			// Uploaded bills listing and inspection (admin only)
 			r.Get("/api/admin/bills", jobHandler.ListUploadedBills)
 			r.Get("/api/admin/bills/{hash}/download", jobHandler.AdminDownloadUploadedBill)

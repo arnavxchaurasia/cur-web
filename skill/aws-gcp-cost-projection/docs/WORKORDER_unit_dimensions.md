@@ -276,11 +276,34 @@ State these in your summary rather than treating them as regressions:
 
 ## 7. Done
 
-- [ ] `data/unit_dimensions.json` covers every catalog and corpus unit, or
-      lists the exceptions.
-- [ ] Substring heuristics deleted; `unit_class()` kept only as a shim.
-- [ ] `compatible()` fails closed on unknown units.
-- [ ] `resolve_sku.py` uses it and no longer skips on `None`.
-- [ ] `unit_unknown` / `unit_mismatch` diagnostics emitted with dollars.
-- [ ] 6 tests pass, including the `Hrs` vs `GiBy.h` regression case.
+- [x] `data/unit_dimensions.json` covers every catalog and corpus unit, or
+      lists the exceptions. (All 20 distinct catalog units over 90,335 SKUs
+      resolve — enforced by `test_every_catalog_unit_is_known`.)
+- [x] Substring heuristics deleted; `unit_class()` kept only as a shim.
+- [x] `compatible()` fails closed on unknown units.
+- [x] `resolve_sku.py` uses it and no longer skips on `None`.
+- [x] `unit_unknown` / `unit_mismatch` diagnostics emitted with dollars.
+- [x] 6 tests pass, including the `Hrs` vs `GiBy.h` regression case. (Now 7 —
+      added `test_every_mapper_expected_unit_is_known`.)
 - [ ] Before/after dollar totals reported, with every moved row group explained.
+      PARTIAL: see review-fix log — no populated job DB available here to run a
+      real before/after; static analysis shows every catalog unit AND every
+      mapper expected-unit resolves, so no *legitimate* pairing is newly rejected.
+
+---
+
+## 8. PROGRESS / REVIEW LOG
+- 2026-10-30 Review-fix pass — Implementation verified against the real catalog:
+  `test_every_catalog_unit_is_known` runs over `data/catalog.duckdb` (90,335 SKUs,
+  20 distinct units) and all resolve; fail-closed `compatible()` + `resolve_sku`
+  reject-on-mismatch with `unit_unknown`/`unit_mismatch` dollar diagnostics are in
+  place; substring heuristics removed, `unit_class()` is a shim. Added
+  `test_every_mapper_expected_unit_is_known` pinning the mapper-side vocabulary
+  (`infer_expected_unit` outputs + the legacy `storage-month` literal) — all
+  resolve, so a legitimate mapping cannot be rejected for lack of a dimension
+  entry. Full suite 1142 -> 1143 (new test) passing.
+  STILL OPEN: the before/after DOLLAR impact of the stricter guard (which real
+  row groups moved priced -> passthrough) is unevidenced — needs a run against a
+  populated job DB. Static reasoning says movement is limited to genuine
+  dimensional mismatches the old lenient code wrongly accepted (correct moves),
+  but this must be confirmed on a real bill before treating §5 as satisfied.
