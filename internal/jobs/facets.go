@@ -81,14 +81,8 @@ func (h *Handler) FacetsListJobs(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("[]"))
 		return
 	}
-	json.NewEncoder(w).Encode(jobs)
 }
 
-// FacetsLogs is a backward-compatible alias for JobLogs, kept for one release.
-// TODO(cleanup): remove once frontend routes point exclusively to /api/jobs/{id}/logs.
-func (h *Handler) FacetsLogs(w http.ResponseWriter, r *http.Request) {
-	h.JobLogs(w, r)
-}
 
 // tailLines returns up to `want` trailing lines of path (capped at `max`),
 // or an empty slice if the file doesn't exist — never an error, since a job

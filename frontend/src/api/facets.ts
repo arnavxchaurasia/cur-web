@@ -44,7 +44,7 @@ export async function facetsListJobs(): Promise<Job[]> {
 }
 
 export async function facetsGetLogs(jobId: string): Promise<string[]> {
-  const res = await fetch(`/api/facets/jobs/${jobId}/logs`)
+  const res = await fetch(`/api/jobs/${jobId}/logs`)
   if (!res.ok) return []
   const data = await res.json()
   return data.lines ?? []

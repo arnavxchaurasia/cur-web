@@ -313,7 +313,6 @@ func main() {
 		// auth.Session.IsFacetsEmployee() itself — this route group only
 		// requires a valid session, same as everything else above.
 		r.Get("/api/facets/jobs", jobHandler.FacetsListJobs)
-		r.Get("/api/facets/jobs/{id}/logs", jobHandler.FacetsLogs)
 		r.Post("/api/facets/portfolio-summary", jobHandler.FacetsPortfolioSummary)
 		r.Get("/api/facets/portfolio-summary.html", jobHandler.FacetsPortfolioSummaryHTML)
 		r.Get("/api/facets/portfolio-summary.xlsx", jobHandler.FacetsPortfolioSummaryXLSX)
