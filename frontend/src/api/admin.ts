@@ -104,6 +104,16 @@ export async function setUserRole(email: string, role: string): Promise<void> {
   })
   if (!res.ok) {
     const text = await res.text()
+    try {
+      const data = JSON.parse(text)
+      if (data && data.error) {
+        throw new Error(data.error)
+      }
+    } catch (e) {
+      if (e instanceof Error && !e.message.includes('JSON')) {
+        throw e
+      }
+    }
     throw new Error(text || `role update failed (${res.status})`)
   }
 }

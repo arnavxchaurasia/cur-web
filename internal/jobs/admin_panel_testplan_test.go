@@ -215,7 +215,7 @@ func TestSection4_1_UsersAndRoles(t *testing.T) {
 	defer d.Close()
 
 	jobsDir := t.TempDir()
-	adminEmails := []string{"a@facets.cloud"}
+	adminEmails := []string{"root@facets.cloud"}
 	h := jobs.NewHandler(d, jobsDir, jobs.NewSpawner(jobs.SpawnerConfig{}), nil, jobs.NotifyConfig{}, adminEmails)
 
 	require.NoError(t, d.UpsertUserSeen("a@facets.cloud", "admin"))
@@ -450,3 +450,34 @@ func TestSection5_NegativeAndRobustness(t *testing.T) {
 	h.AdminPutAssumption(recMalformed, reqMalformed)
 	assert.Equal(t, http.StatusBadRequest, recMalformed.Code)
 }
+
+func TestAdminSetUserRole_RefusesDemotingAdminEmailsEntry(t *testing.T) {
+	d, err := db.Open(":memory:")
+	require.NoError(t, err)
+	defer d.Close()
+
+	jobsDir := t.TempDir()
+	adminEmails := []string{"breakglass@facets.cloud", "a@facets.cloud"}
+	h := jobs.NewHandler(d, jobsDir, jobs.NewSpawner(jobs.SpawnerConfig{}), nil, jobs.NotifyConfig{}, adminEmails)
+
+	// User breakglass@facets.cloud starts as admin in DB
+	require.NoError(t, d.UpsertUserSeen("breakglass@facets.cloud", "admin"))
+	require.NoError(t, d.UpsertUserSeen("a@facets.cloud", "admin"))
+
+	// Caller 'a@facets.cloud' attempts to demote 'breakglass@facets.cloud' to viewer
+	req, _ := http.NewRequestWithContext(ctxWithFullSession("a@facets.cloud", "Admin A", "admin"), "POST", "/api/admin/users/breakglass@facets.cloud/role", nil)
+	req = req.WithContext(withChiParam(req.Context(), "email", "breakglass@facets.cloud"))
+	req.Body = ioCloserWrapper(`{"role":"viewer"}`)
+	rec := httptest.NewRecorder()
+	h.AdminSetUserRole(rec, req)
+
+	// Assert: status 409, and the response body mentions ADMIN_EMAILS.
+	assert.Equal(t, http.StatusConflict, rec.Code)
+	assert.Contains(t, rec.Body.String(), "ADMIN_EMAILS")
+
+	// Assert: the stored role is UNCHANGED afterwards (read it back).
+	role, err := d.GetUserRole("breakglass@facets.cloud")
+	require.NoError(t, err)
+	assert.Equal(t, "admin", role)
+}
+

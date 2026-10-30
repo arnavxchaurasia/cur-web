@@ -360,6 +360,19 @@ func (h *Handler) AdminSetUserRole(w http.ResponseWriter, r *http.Request) {
 		currentRole = "viewer"
 	}
 
+	// Guardrail 7: an address in $ADMIN_EMAILS resolves as admin at read time
+	// regardless of its stored role, so storing "viewer" for it would not
+	// revoke anything — it would only make the admin UI disagree with reality.
+	// Refuse, and tell the operator where the real change has to happen.
+	if body.Role != "admin" {
+		for _, ae := range h.adminEmails {
+			if strings.EqualFold(strings.TrimSpace(ae), lowerTargetEmail) {
+				http.Error(w, `{"error":"this address is in the ADMIN_EMAILS environment allow-list and resolves as admin regardless of stored role; remove it from ADMIN_EMAILS and restart the server to revoke access"}`, http.StatusConflict)
+				return
+			}
+		}
+	}
+
 	isTargetFacets := auth.IsFacetsEmail(lowerTargetEmail)
 	isCallerFacets := sess != nil && sess.IsFacetsEmployee()
 
