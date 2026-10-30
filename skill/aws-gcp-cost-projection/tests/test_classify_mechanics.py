@@ -433,15 +433,28 @@ def test_timestream_not_compute_breakdown():
 # WORKORDER_charge_type_misrouting_fix tests
 # ---------------------------------------------------------------------------
 
-def test_aurora_serverless_io_routes_to_block_storage():
-    """Aurora Serverless I/O request rows must route to block_storage, NOT managed_db."""
-    r = row(product="Amazon Relational Database Service",
-            usage_type="APS3-Aurora:ServerlessV2IOOptimizedUsage",
-            operation="CreateDBInstance:0016",
-            unit="ACU-Hr")
-    res = classify(r)
-    assert res == "block_storage"
-    assert res != "managed_db"
+def test_aurora_serverless_io_optimized_acu_is_compute():
+    """ServerlessV2 IO-Optimized usage billed in ACU-Hr is COMPUTE (Aurora Capacity
+    Units per hour), so it routes to managed_db — not block_storage. (The row name
+    contains 'IOOptimized' but the unit is ACU-Hr; it is the serverless compute
+    charge of an I/O-optimized cluster, not a per-I/O row.)
+
+    Genuine per-I/O rows (unit=IOs) must NOT be priced as GB-Mo storage — that is
+    the 1300x-inflation class — nor as compute; they passthrough via the Aurora
+    I/O branch (replicated_write_io -> misc/passthrough)."""
+    acu = row(product="Amazon Relational Database Service",
+              usage_type="APS3-Aurora:ServerlessV2IOOptimizedUsage",
+              operation="CreateDBInstance:0016",
+              unit="ACU-Hr")
+    assert classify(acu) == "managed_db"
+
+    for ut in ("APS3-Aurora:StorageIOUsage", "APS3-Aurora:VolumeIOUsage",
+               "APS3-Aurora:ReplicatedWriteIO"):
+        io = row(product="Amazon Relational Database Service",
+                 usage_type=ut, operation="", unit="IOs")
+        g = classify(io)
+        assert g != "block_storage", f"{ut} priced as storage (1300x inflation risk): {g}"
+        assert g != "managed_db", f"{ut} misrouted to compute: {g}"
 
 
 def test_waf_requests_and_rules_route_to_waf_per_request():

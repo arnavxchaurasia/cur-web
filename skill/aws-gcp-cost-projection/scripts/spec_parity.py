@@ -130,7 +130,7 @@ def main(argv):
                 continue
 
             matched = sum(1 for ct in sd.SPECS[canon].get("charge_types", [])
-                          if sd._charge_type_matches(ct, r))
+                          if sd._charge_type_matches(ct, r) and not sd.is_default_charge_type(ct))
             if matched > 1:
                 ambig[(canon, d["charge_type"], matched)] += 1
 

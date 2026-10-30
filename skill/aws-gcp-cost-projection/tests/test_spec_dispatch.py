@@ -213,7 +213,7 @@ CASES = [
     ("glue_catalog_fallback",
      _row(product="AWS Glue", product_code="AWSGlue",
           usage_type="APS3-Catalog-Requests", unit="Requests"),
-     "per_request", None),  # not a DPU row -> dispatch None -> legacy -> per_request
+     "per_request", "glue_catalog_requests"),
 
     # ---- Kinesis ----
     ("kinesis_shard_hours",

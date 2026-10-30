@@ -8,14 +8,13 @@ Reads data/service_specs.json and classifies a row by:
     3. -> (mechanic, charge_type, fields, field_state)
 
 This is the replacement engine for the per-service portion of
-classify_mechanics.py's flat global rule chain. It does NOT yet own
-classification in the pipeline — it runs in shadow/parity mode first
-(see tests/test_spec_dispatch.py and docs/SERVICE_SPECS_DESIGN.md).
+classify_mechanics.py's flat global rule chain. It owns classification in
+the pipeline (OWNS_CLASSIFICATION = True) following WORKORDER_spec_dispatch_cutover.md.
 
 Global, service-agnostic exclusion rules (negative_cost, commitment_discount,
 non_workload) are NOT re-implemented here — they stay in classify_mechanics.py
 and run as a pre-filter before dispatch. classify_via_specs() wires the two
-together so parity can be measured against classify_mechanics.classify().
+together as the authoritative classification pipeline.
 
 Pure library + CLI. No DB writes. Import `dispatch` / `classify_via_specs`.
 """
@@ -24,6 +23,8 @@ import os
 import re
 import sys
 import json
+
+OWNS_CLASSIFICATION: bool = True
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config_loader import load_data_config as _cfg
@@ -290,23 +291,61 @@ def matching_charge_types(canon: str, row: dict) -> list[str]:
     return out
 
 
-def classify_via_specs(row: dict) -> str:
-    """Full classification path used for parity testing and eventual cutover:
-    global exclusion pre-filters -> per-service dispatch -> legacy fallback.
-    Returns a mechanic_group label directly comparable to
-    classify_mechanics.classify(row)."""
+SPEC_GAP_COUNTS: dict[str, int] = {}
+
+
+def record_spec_gap(service: str, row: dict | None = None) -> None:
+    SPEC_GAP_COUNTS[service] = SPEC_GAP_COUNTS.get(service, 0) + 1
+
+
+def classify_via_specs_with_trace(row: dict) -> tuple[str, str]:
+    """Authoritative classification path:
+    1. Global exclusion pre-filters (negative_cost, commitment_discount, non_workload)
+    2. Per-service spec dispatch (Layer 1.5)
+    3. If service has a spec but no charge_type matched -> explicit generic fallback ("misc", "spec_gap:<svc>")
+    4. If service has no spec -> demoted long-tail fallback rules from classify_mechanics
+    Guaranteed to return a non-null mechanic_group.
+    """
     for name in _EXCLUSION_ORDER:
         test = _EXCLUSION_TESTS.get(name)
         if test is not None:
             try:
                 if test(row):
-                    return name
+                    return name, f"prefilter:{name}"
             except Exception:
                 pass
+
     d = dispatch(row)
     if d is not None:
-        return d["mechanic"]
-    return _cm.classify(row)
+        return d["mechanic"], f"spec:{d['service']}.{d['charge_type']}"
+
+    canon = row.get("canonical")
+    if canon is None:
+        canon = _canonical_service(row.get("product"), row.get("product_code"))
+
+    if canon in SPECS:
+        # Service has a declared spec, but no charge-type matched (spec gap).
+        # Route to explicit generic fallback; loud, not silent.
+        record_spec_gap(canon, row)
+        return "misc", f"spec_gap:{canon}"
+
+    # Unspecced service: demoted long-tail rules in classify_mechanics
+    if hasattr(_cm, "classify_long_tail_with_trace"):
+        group, rule = _cm.classify_long_tail_with_trace(row)
+    elif hasattr(_cm, "_legacy_classify_with_trace"):
+        group, rule = _cm._legacy_classify_with_trace(row)
+    elif hasattr(_cm, "classify_with_trace"):
+        group, rule = _cm.classify_with_trace(row)
+    else:
+        group = _cm.classify(row)
+        rule = "legacy"
+
+    return group or "misc", rule or "misc"
+
+
+def classify_via_specs(row: dict) -> str:
+    """Full authoritative classification path."""
+    return classify_via_specs_with_trace(row)[0]
 
 
 # ---------------------------------------------------------------------------

@@ -149,10 +149,15 @@ def test_invariant_classify_with_trace_consistency():
         group = cm.classify(r)
         group_trace, rule_label = cm.classify_with_trace(r)
         assert group == group_trace, f"classify ({group}) != classify_with_trace group ({group_trace})"
+        # Post-cutover trace schemes: spec:<svc>.<ct>, spec_gap:<svc>,
+        # prefilter:<name>, spec_error, legacy long-tail "<group>#<idx>", or "misc".
         if group == "misc":
-            assert rule_label == "misc", f"misc group should have rule_label 'misc', got {rule_label}"
+            assert rule_label == "misc" or rule_label.startswith(("spec_gap:", "spec_error")), \
+                f"misc group should have rule_label 'misc'/'spec_gap:*'/'spec_error', got {rule_label}"
         else:
-            assert rule_label.startswith(f"{group}#"), f"rule_label {rule_label} inconsistent with group {group}"
+            assert (rule_label.startswith(("spec:", "prefilter:"))
+                    or rule_label.startswith(f"{group}#")), \
+                f"rule_label {rule_label} inconsistent with group {group}"
 
 
 def main():

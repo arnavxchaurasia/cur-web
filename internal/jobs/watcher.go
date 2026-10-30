@@ -216,8 +216,12 @@ func (w *Watcher) finalize(jobID string, allowRetry bool, logOffset int64) {
 			slog.Info("validator clean", "job_id", jobID)
 		}
 		var gcpOD *float64
+		latestRunID := "initial"
 		if runs, err := QueryRunResults(dbPath); err == nil && len(runs) > 0 {
 			gcpOD = runs[0].GCPOD
+			if runs[0].RunID != "" {
+				latestRunID = runs[0].RunID
+			}
 		}
 		if err := w.db.UpdateJobDoneWithGCPOD(jobID, spend, gcpOD); err != nil {
 			log.Printf("watcher %s: UpdateJobDoneWithGCPOD: %v", jobID, err)
@@ -230,13 +234,13 @@ func (w *Watcher) finalize(jobID string, allowRetry bool, logOffset int64) {
 		// survives job-directory expiration (ephemeral storage redeploys).
 		diagPath := filepath.Join(jobDir, "projection-audit", "run_diagnostics.json")
 		if summary, err := os.ReadFile(diagPath); err == nil {
-			if err := w.db.SaveJobDiagnostics(jobID, "initial", summary); err != nil {
+			if err := w.db.SaveJobDiagnostics(jobID, latestRunID, summary); err != nil {
 				log.Printf("watcher %s: SaveJobDiagnostics: %v", jobID, err)
 			}
 		} else {
 			log.Printf("watcher %s: run_diagnostics.json not present, skipping diagnostics persist", jobID)
 		}
-		w.recordJobLogDigest(jobID, "initial", jobDir)
+		w.recordJobLogDigest(jobID, latestRunID, jobDir)
 		w.syncRemote(jobID, jobDir)
 		go func() {
 			userSettings, err := w.db.GetNotificationSettings(job.Owner)

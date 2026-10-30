@@ -369,7 +369,7 @@
         "id": "ebs_storage",
         "description": "EBS volumes & snapshots (gp2/gp3/io1/io2/sc1/st1) billed GB-Mo.",
         "match": {
-          "usage_type_re": "EBS:Volume|EBS:Snapshot|gp2|gp3|io1|io2|sc1|st1"
+          "usage_type_re": "EBS:Volume|EBS:Snapshot|SnapshotCopy|gp2|gp3|io1|io2|sc1|st1"
         },
         "fallback_match": {
           "operation_re": "\\((?:gp2|gp3|io1|io2|sc1|st1)\\)\\s+provisioned storage|snapshot data stored|provisioned (?:IOPS|MiBps)-month of (?:gp2|gp3|io1|io2)|GB-month provisioned|GB-month of (?:general purpose|provisioned|data stored)|/GB-month provisioned|per GB-month of"
@@ -456,9 +456,9 @@
       },
       {
         "id": "nat_and_flat_hourly",
-        "description": "NAT gateway-hours, Elastic IP, public IPv4, VPN connection-hours — fixed hourly fees.",
+        "description": "NAT gateway-hours, Elastic IP, public IPv4, VPN connection-hours, and ALB/NLB load-balancer-hours (billed under the EC2 product) — fixed hourly fees.",
         "match": {
-          "usage_type_re": "NatGateway-Hours|ElasticIP|IPAddress|PublicIPv4|VPN-Connections|VPNConnection"
+          "usage_type_re": "NatGateway-Hours|ElasticIP|IPAddress|PublicIPv4|VPN-Connections|VPNConnection|LoadBalancerUsage"
         },
         "mechanic": "flat_hourly",
         "fields": [
@@ -655,7 +655,7 @@
         "description": "RDS storage capacity (GB-Mo), non-hourly unit -> Cloud SQL storage SKU.",
         "match": {
           "any_field_re": "gb-mo|storage",
-          "exclude_any_field_re": "backup|snapshot"
+          "exclude_any_field_re": "backup|snapshot|IOUsage|ReplicatedWriteIO"
         },
         "exclude_when": {
           "unit_hourly": true
@@ -683,6 +683,52 @@
         ],
         "source_rule": "block_storage (managed-db storage branch)",
         "notes": "Backup/snapshot rows are owned by the `backup` charge_type; excluded here so the two cannot both match (both route to block_storage, so this is a clarity fix, not a behaviour change)."
+      },
+      {
+        "id": "rds_data_transfer",
+        "description": "RDS data transfer out / cross-region transfer.",
+        "match": {
+          "usage_type_re": "DataTransfer|Out-Bytes|In-Bytes"
+        },
+        "mechanic": "data_transfer",
+        "fields": [
+          {
+            "name": "direction",
+            "cur_column": "lineItem/UsageType",
+            "source": "cur",
+            "required": true
+          },
+          {
+            "name": "gb",
+            "cur_column": "lineItem/UsageAmount",
+            "source": "cur",
+            "required": true
+          }
+        ],
+        "source_rule": "data_transfer (RDS egress branch)"
+      },
+      {
+        "id": "replicated_write_io",
+        "description": "Aurora storage I/O operations (Replicated Write IOs, Storage/Volume IO usage). Per-I/O rows (unit=IOs) — NOT storage capacity. Cloud SQL bundles I/O into disk price, so these passthrough; pricing them as GB-Mo storage is the 1300x-inflation bug this branch guards against.",
+        "match": {
+          "any_field_re": "ReplicatedWriteIO|IOUsage"
+        },
+        "mechanic": "misc",
+        "fields": [
+          {
+            "name": "ios",
+            "cur_column": "lineItem/UsageAmount",
+            "source": "cur",
+            "required": true
+          }
+        ],
+        "source_rule": "legacy misc (Aurora I/O branch)",
+        "llm_guidance": {
+          "gcp_target": "Cloud SQL",
+          "strategy": "passthrough",
+          "confidence_max": 0.3,
+          "guidance": "Aurora Replicated Write IOs have no direct Cloud SQL equivalent — Cloud SQL bundles storage I/O into disk capacity price. Carry at cost parity with manual review."
+        }
       }
     ]
   },
@@ -1226,6 +1272,23 @@
           }
         ],
         "source_rule": "glue (scoped to DPU-hour rows; Catalog-Storage/Request rows fall to misc)"
+      },
+      {
+        "id": "glue_catalog_requests",
+        "description": "Glue Data Catalog requests.",
+        "match": {
+          "usage_type_re": "Catalog-Requests"
+        },
+        "mechanic": "per_request",
+        "fields": [
+          {
+            "name": "requests",
+            "cur_column": "lineItem/UsageAmount",
+            "source": "cur",
+            "required": true
+          }
+        ],
+        "source_rule": "per_request (Glue Catalog requests)"
       }
     ]
   },
@@ -1415,6 +1478,23 @@
           }
         ],
         "source_rule": "shield (scoped to Monthly-Fee; Shield-tagged egress rows -> data_transfer fallback)"
+      },
+      {
+        "id": "shield_data_transfer",
+        "description": "Shield data transfer / protected egress.",
+        "match": {
+          "usage_type_re": "DataTransfer|Out-Bytes|In-Bytes"
+        },
+        "mechanic": "data_transfer",
+        "fields": [
+          {
+            "name": "gb",
+            "cur_column": "lineItem/UsageAmount",
+            "source": "cur",
+            "required": true
+          }
+        ],
+        "source_rule": "data_transfer (Shield egress branch)"
       }
     ]
   },
@@ -1905,7 +1985,7 @@
         "description": "LCU / processed-bytes -> data processing egress.",
         "any_of": [
           {
-            "usage_type_re": "LCUUsage|LoadBalancer-Bytes"
+            "usage_type_re": "LCUUsage|LoadBalancer-Bytes|DataTransfer|Out-Bytes"
           },
           {
             "operation_re": "LCU-Hrs?|capacity unit-hour"
@@ -2915,6 +2995,20 @@
         "notes": "Added after spec_parity showed 4 rows / $198 reaching vpc_other -> misc while the legacy chain classified them flat_hourly. Same class as vpc_public_ipv4: a deterministic per-hour charge that must not be handed to the LLM."
       },
       {
+        "id": "vpc_nat_hours",
+        "description": "NAT gateway-hours billed under the VPC product. Flat per-gateway-hour fee; GCP Cloud NAT bills an hourly gateway charge. (NAT also appears under the EC2 product -> ec2.nat_and_flat_hourly.)",
+        "match": {
+          "usage_type_re": "NatGateway-Hours"
+        },
+        "fallback_match": {
+          "operation_re": "NatGateway|NAT Gateway"
+        },
+        "mechanic": "flat_hourly",
+        "fields": [],
+        "source_rule": "flat_hourly (NatGateway-Hours branch)",
+        "notes": "Added after the cutover review: VpcUsage:NatGateway-Hours under the VPC product fell through to vpc_other -> misc while the legacy chain classified it flat_hourly. Same deterministic class as vpc_public_ipv4/vpc_vpn_hours."
+      },
+      {
         "id": "vpc_other",
         "description": "VPC endpoints / PrivateLink / other -> misc (service_map -> PSC passthrough).",
         "match": {},
@@ -3002,10 +3096,28 @@
         "source_rule": "per_request (Fargate GB-Hours -> GKE Autopilot)"
       },
       {
+        "id": "ecs_data_transfer",
+        "description": "ECS data transfer / regional egress.",
+        "match": {
+          "usage_type_re": "DataTransfer|Out-Bytes|In-Bytes|Regional-Bytes"
+        },
+        "mechanic": "data_transfer",
+        "fields": [
+          {
+            "name": "gb",
+            "cur_column": "lineItem/UsageAmount",
+            "source": "cur",
+            "required": true
+          }
+        ],
+        "source_rule": "data_transfer (ECS egress branch)"
+      },
+      {
         "id": "ecs_fargate_any",
         "description": "Any other Fargate compute row -> GKE Autopilot.",
         "match": {
-          "any_field_re": "fargate"
+          "any_field_re": "fargate",
+          "exclude_usage_type_re": "DataTransfer|Out-Bytes|In-Bytes|Regional-Bytes"
         },
         "mechanic": "per_request",
         "fields": [

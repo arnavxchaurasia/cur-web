@@ -590,17 +590,7 @@ RULES = [
             (_ilike(r["product"], "Elastic Block")
              and not _re(r["operation"], r"Infrequent Access|Glacier|Intelligent-Tiering|Deep Archive"))
             or _re(r["usage_type"], r"EBS:Volume|EBS:Snapshot|gp2|gp3|io1|io2|sc1|st1")
-            # Generic "Storage" usage_type catch — exclusion list prevents misroutes:
-            # S3/DynamoDB (own handlers), Lambda ephemeral storage (61x inflation
-            # observed when priced as Cloud Storage), VPC (endpoint data ≠ storage),
-            # SageMaker (service_map routes it to Vertex AI review).
-            or (_re(r["usage_type"], r"Storage")
-                and not _ilike(r["product"], "S3")
-                and not _ilike(r["product"], "Simple Storage")
-                and not _ilike(r["product"], "DynamoDB")
-                and not _ilike(r["product"], "Lambda")
-                and not _ilike(r["product"], "Virtual Private Cloud")
-                and not _ilike(r["product"], "SageMaker"))
+            or _re(r["usage_type"], r"Storage")
             or _re(r["operation"], r"GP3-Storage|Provisioned GP3 storage")
             # PDF-flat-bill EBS rows: product is genuinely "Elastic Compute Cloud"
             # (not "Elastic Block [Store]") and usage_type is a bare "EBS" with no
@@ -1241,7 +1231,8 @@ RULES = [
     ),
 ]
 
-def classify_with_trace(row: dict) -> tuple[str, str]:
+def classify_long_tail_with_trace(row: dict) -> tuple[str, str]:
+    """Evaluate long-tail rules for services not yet specced in data/service_specs.json."""
     for idx, (group, test) in enumerate(RULES):
         try:
             if test(row):
@@ -1250,6 +1241,37 @@ def classify_with_trace(row: dict) -> tuple[str, str]:
             print(f"classify_mechanics: rule {group}#{idx} raised {exc!r}", file=sys.stderr)
             continue
     return "misc", "misc"
+
+
+def _legacy_classify_with_trace(row: dict) -> tuple[str, str]:
+    return classify_long_tail_with_trace(row)
+
+
+def _legacy_classify(row: dict) -> str:
+    return classify_long_tail_with_trace(row)[0]
+
+
+def classify_with_trace(row: dict) -> tuple[str, str]:
+    """Authoritative classification: routed through spec_dispatch (Layer 1.5)."""
+    try:
+        import spec_dispatch as _sd
+    except ImportError:
+        # spec_dispatch genuinely unavailable (e.g. standalone import) — the
+        # legacy long-tail is the only engine present. Safe: no spec exists to
+        # bypass here.
+        return classify_long_tail_with_trace(row)
+    try:
+        return _sd.classify_via_specs_with_trace(row)
+    except Exception as _exc:
+        # spec_dispatch raised on THIS row. Do NOT fall through to the long-tail:
+        # block_storage's cross-service exclusions were removed at cutover, so a
+        # specced row (Lambda/VPC/SageMaker ...) hitting the generic "Storage"
+        # rule would silently resurrect the 61x misroute. Route to misc loudly
+        # instead, tagged so it is countable in mechanic_rule.
+        print(f"classify_mechanics: spec_dispatch raised on "
+              f"{row.get('product')!r}/{row.get('usage_type')!r}: {_exc}",
+              file=sys.stderr)
+        return "misc", "spec_error"
 
 
 def classify(row: dict) -> str:

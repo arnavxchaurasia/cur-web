@@ -1,7 +1,8 @@
 # Per-Service Charge-Type Specs — Design & Migration Plan
 
-Status: **foundation laid** (schema + EC2/RDS seed in `data/service_specs.json`).
-Not yet wired into the pipeline. This doc is the contract and the roadmap.
+Status: **CUTOVER COMPLETE (Layer 1.5)**. 54 services specced in `data/service_specs.json`.
+Pipeline classification runs via `spec_dispatch.py` (OWNS_CLASSIFICATION = True) through `classify_mechanics.py`.
+Parity: 98.1% agree ($977,759), 0 differ, 0 spec gap, 0 ambiguous.
 For the complete system blueprint across all layers (0–4), see [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md).
 
 ---

@@ -75,7 +75,7 @@ CHAIN = [
     ("ingest.py", []),
     ("aws_normalizer.py", ["$DB"]),
     ("resolve_unknown_product_codes.py", ["$DB"]),
-    # Phase 2 - Mapping (pre-LLM deterministic)
+    # Phase 2 - Mapping (pre-LLM deterministic: spec_dispatch / classify_via_specs via classify_mechanics.py)
     ("classify_mechanics.py", ["$DB"]),
     ("apply_commitment_ignores.py", ["$DB"]),
     ("apply_static_mappings.py", ["$DB"]),
