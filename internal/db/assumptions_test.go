@@ -161,3 +161,92 @@ func TestAssumptionsUpdateUnknownKey(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
+
+func TestAssumptionCategoriesAndMigrationIdempotency(t *testing.T) {
+	tempFile := t.TempDir() + "/test_assumptions.db"
+
+	// 1. First Open runs schema creation, migrations, and seeding
+	d1, err := db.Open(tempFile)
+	require.NoError(t, err)
+
+	assumptions1, err := d1.GetAssumptions()
+	require.NoError(t, err)
+	require.NotEmpty(t, assumptions1)
+
+	// Verify all rows have a non-empty, valid category
+	for _, a := range assumptions1 {
+		assert.NotEmpty(t, a.Category, "assumption %s must have a category", a.Key)
+		assert.True(t, db.IsValidAssumptionCategory(a.Category), "category %s for %s must be valid", a.Category, a.Key)
+	}
+
+	// Verify specific seeded categories
+	byKey := make(map[string]*db.Assumption)
+	for _, a := range assumptions1 {
+		byKey[a.Key] = a
+	}
+	assert.Equal(t, "compute_sizing", byKey["glue_dpu_vcpu"].Category)
+	assert.Equal(t, "compute_sizing", byKey["aurora_acu_vcpu"].Category)
+	assert.Equal(t, "commitment", byKey["aws_ri_1yr_discount_pct"].Category)
+	assert.Equal(t, "commitment", byKey["aws_spot_discount_pct"].Category)
+	assert.Equal(t, "other", byKey["looker_studio_pro_seat_usd"].Category)
+
+	require.NoError(t, d1.Close())
+
+	// 2. Second Open verifies migration and seeding idempotency
+	d2, err := db.Open(tempFile)
+	require.NoError(t, err)
+	defer d2.Close()
+
+	assumptions2, err := d2.GetAssumptions()
+	require.NoError(t, err)
+	require.Len(t, assumptions2, len(assumptions1))
+	for _, a := range assumptions2 {
+		assert.NotEmpty(t, a.Category)
+		assert.True(t, db.IsValidAssumptionCategory(a.Category))
+	}
+}
+
+func TestAssumptionCategoryValidation(t *testing.T) {
+	d := newAssumptionsTestDB(t)
+
+	// Reject invalid category on Create
+	err := d.CreateAssumption(&db.Assumption{
+		Key:          "test_bad_cat",
+		Value:        10.0,
+		DefaultValue: 10.0,
+		MinValue:     1.0,
+		MaxValue:     100.0,
+		Category:     "nonsense",
+	}, "admin@test.com")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid category")
+
+	// Accept valid category on Create
+	err = d.CreateAssumption(&db.Assumption{
+		Key:          "test_valid_cat",
+		Value:        10.0,
+		DefaultValue: 10.0,
+		MinValue:     1.0,
+		MaxValue:     100.0,
+		Category:     "compute_sizing",
+	}, "admin@test.com")
+	require.NoError(t, err)
+
+	// Reject invalid category on Update
+	_, err = d.UpdateAssumption("test_valid_cat", 20.0, "update cat", "admin@test.com", "bogus_cat")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid category")
+
+	// Accept valid category on Update
+	_, err = d.UpdateAssumption("test_valid_cat", 20.0, "update cat", "admin@test.com", "licensing")
+	require.NoError(t, err)
+
+	assumptions, err := d.GetAssumptions()
+	require.NoError(t, err)
+	for _, a := range assumptions {
+		if a.Key == "test_valid_cat" {
+			assert.Equal(t, "licensing", a.Category)
+			assert.Equal(t, 20.0, a.Value)
+		}
+	}
+}

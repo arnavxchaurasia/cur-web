@@ -14,5 +14,17 @@
     "aws_ri_3yr_discount_pct": 0.52,
     "aws_sp_discount_pct": 0.30,
     "aws_spot_discount_pct": 0.70
+  },
+  "categories": {
+    "glue_dpu_vcpu": "compute_sizing",
+    "glue_dpu_ram_gib": "compute_sizing",
+    "looker_studio_pro_seat_usd": "other",
+    "aurora_acu_vcpu": "compute_sizing",
+    "aurora_acu_ram_gib": "compute_sizing",
+    "lambda_mb_per_vcpu": "compute_sizing",
+    "aws_ri_1yr_discount_pct": "commitment",
+    "aws_ri_3yr_discount_pct": "commitment",
+    "aws_sp_discount_pct": "commitment",
+    "aws_spot_discount_pct": "commitment"
   }
 }

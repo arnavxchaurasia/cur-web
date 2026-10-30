@@ -75,6 +75,7 @@ func buildTestRouter(database *db.DB, jobsDir string, adminEmails []string) http
 			r.Get("/api/admin/audit", jobHandler.AdminAuditLog)
 			r.Get("/api/admin/analytics", jobHandler.AdminAnalytics)
 			r.Get("/api/admin/assumptions", jobHandler.AdminGetAssumptions)
+			r.Post("/api/admin/assumptions", jobHandler.AdminCreateAssumption)
 			r.Put("/api/admin/assumptions/{key}", jobHandler.AdminPutAssumption)
 			r.Get("/api/admin/assumptions/history", jobHandler.AdminGetAssumptionHistory)
 			r.Get("/api/admin/report-settings", jobHandler.AdminGetReportSettings)
@@ -334,6 +335,20 @@ func TestSection4_2_AssumptionsValidationAndPersistence(t *testing.T) {
 	recList := httptest.NewRecorder()
 	h.AdminGetAssumptions(recList, reqList)
 	assert.Equal(t, http.StatusOK, recList.Code)
+	var listResp struct {
+		Assumptions []struct {
+			Key      string `json:"key"`
+			Category string `json:"category"`
+		} `json:"assumptions"`
+		Categories []string `json:"categories"`
+		Version    string   `json:"version"`
+	}
+	require.NoError(t, json.Unmarshal(recList.Body.Bytes(), &listResp))
+	assert.Equal(t, db.AssumptionCategories, listResp.Categories)
+	for _, a := range listResp.Assumptions {
+		assert.NotEmpty(t, a.Category)
+		assert.True(t, db.IsValidAssumptionCategory(a.Category))
+	}
 
 	// 2. Change aurora_acu_vcpu to a valid value (0.5)
 	reqValid, _ := http.NewRequestWithContext(ctxWithFullSession("a@facets.cloud", "A", "admin"), "PUT", "/api/admin/assumptions/aurora_acu_vcpu", nil)
@@ -358,6 +373,28 @@ func TestSection4_2_AssumptionsValidationAndPersistence(t *testing.T) {
 	recNonNum := httptest.NewRecorder()
 	h.AdminPutAssumption(recNonNum, reqNonNum)
 	assert.Equal(t, http.StatusBadRequest, recNonNum.Code)
+
+	// 5. Invalid category on PUT returns 400
+	reqBadCatPut, _ := http.NewRequestWithContext(ctxWithFullSession("a@facets.cloud", "A", "admin"), "PUT", "/api/admin/assumptions/aurora_acu_vcpu", nil)
+	reqBadCatPut = reqBadCatPut.WithContext(withChiParam(reqBadCatPut.Context(), "key", "aurora_acu_vcpu"))
+	reqBadCatPut.Body = ioCloserWrapper(`{"value":0.5,"reason":"test","category":"nonsense"}`)
+	recBadCatPut := httptest.NewRecorder()
+	h.AdminPutAssumption(recBadCatPut, reqBadCatPut)
+	assert.Equal(t, http.StatusBadRequest, recBadCatPut.Code)
+
+	// 6. Invalid category on POST returns 400
+	reqBadCatPost, _ := http.NewRequestWithContext(ctxWithFullSession("a@facets.cloud", "A", "admin"), "POST", "/api/admin/assumptions", nil)
+	reqBadCatPost.Body = ioCloserWrapper(`{"key":"new_assumption","value":1.0,"category":"nonsense"}`)
+	recBadCatPost := httptest.NewRecorder()
+	h.AdminCreateAssumption(recBadCatPost, reqBadCatPost)
+	assert.Equal(t, http.StatusBadRequest, recBadCatPost.Code)
+
+	// 7. Valid category on POST returns 201 Created
+	reqValidPost, _ := http.NewRequestWithContext(ctxWithFullSession("a@facets.cloud", "A", "admin"), "POST", "/api/admin/assumptions", nil)
+	reqValidPost.Body = ioCloserWrapper(`{"key":"new_storage_assumption","value":10.0,"category":"storage"}`)
+	recValidPost := httptest.NewRecorder()
+	h.AdminCreateAssumption(recValidPost, reqValidPost)
+	assert.Equal(t, http.StatusCreated, recValidPost.Code)
 }
 
 func TestSection4_6_ShareLinksSecurity(t *testing.T) {

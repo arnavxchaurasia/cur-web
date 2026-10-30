@@ -529,8 +529,64 @@ func (h *Handler) AdminGetAssumptions(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(contentTypeHeader, contentTypeJSON)
 	json.NewEncoder(w).Encode(map[string]any{
 		"assumptions": assumptions,
+		"categories":  db.AssumptionCategories,
 		"version":     version,
 	})
+}
+
+// AdminCreateAssumption creates a new assumption row.
+func (h *Handler) AdminCreateAssumption(w http.ResponseWriter, r *http.Request) {
+	sess := auth.SessionFromCtx(r.Context())
+	var body struct {
+		Key          string  `json:"key"`
+		Value        float64 `json:"value"`
+		DefaultValue float64 `json:"default_value"`
+		MinValue     float64 `json:"min_value"`
+		MaxValue     float64 `json:"max_value"`
+		Unit         string  `json:"unit"`
+		Title        string  `json:"title"`
+		Rationale    string  `json:"rationale"`
+		Category     string  `json:"category"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Key == "" {
+		http.Error(w, `{"error":"key is required"}`, http.StatusBadRequest)
+		return
+	}
+	if body.Category == "" {
+		body.Category = "other"
+	}
+	if !db.IsValidAssumptionCategory(body.Category) {
+		http.Error(w, `{"error":"invalid category"}`, http.StatusBadRequest)
+		return
+	}
+	if body.MinValue == 0 && body.MaxValue == 0 {
+		body.MaxValue = 1000000.0
+	}
+	if body.DefaultValue == 0 {
+		body.DefaultValue = body.Value
+	}
+	err := h.db.CreateAssumption(&db.Assumption{
+		Key:          body.Key,
+		Value:        body.Value,
+		DefaultValue: body.DefaultValue,
+		MinValue:     body.MinValue,
+		MaxValue:     body.MaxValue,
+		Unit:         body.Unit,
+		Title:        body.Title,
+		Rationale:    body.Rationale,
+		Category:     body.Category,
+	}, sess.Email)
+	if err != nil {
+		if strings.Contains(err.Error(), "invalid category") {
+			http.Error(w, `{"error":"invalid category"}`, http.StatusBadRequest)
+			return
+		}
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusBadRequest)
+		return
+	}
+	_ = h.db.LogAdminAction(sess.Email, "create_assumption", body.Key, fmt.Sprintf("category=%s", body.Category))
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]any{"key": body.Key, "status": "created"})
 }
 
 // AdminPutAssumption updates a single assumption value within bounds.
@@ -539,17 +595,26 @@ func (h *Handler) AdminPutAssumption(w http.ResponseWriter, r *http.Request) {
 	key := chi.URLParam(r, "key")
 
 	var body struct {
-		Value  float64 `json:"value"`
-		Reason string  `json:"reason"`
+		Value    float64 `json:"value"`
+		Reason   string  `json:"reason"`
+		Category string  `json:"category"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Reason == "" {
 		http.Error(w, `{"error":"value and non-empty reason are required"}`, http.StatusBadRequest)
 		return
 	}
+	if body.Category != "" && !db.IsValidAssumptionCategory(body.Category) {
+		http.Error(w, `{"error":"invalid category"}`, http.StatusBadRequest)
+		return
+	}
 
-	version, err := h.db.UpdateAssumption(key, body.Value, body.Reason, sess.Email)
+	version, err := h.db.UpdateAssumption(key, body.Value, body.Reason, sess.Email, body.Category)
 	if err != nil {
 		msg := err.Error()
+		if strings.Contains(msg, "invalid category") {
+			http.Error(w, `{"error":"invalid category"}`, http.StatusBadRequest)
+			return
+		}
 		if strings.Contains(msg, "not found") {
 			http.Error(w, `{"error":"assumption not found"}`, http.StatusNotFound)
 			return

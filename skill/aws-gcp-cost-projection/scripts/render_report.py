@@ -1763,6 +1763,59 @@ def main():
     assumptions_block_html = ""
     if rs_bool("section_assumptions"):
         try:
+            snapshot_data = {}
+            for cand in [os.environ.get("JOB_DIR"), "."]:
+                if cand and os.path.exists(os.path.join(cand, "assumptions.json")):
+                    try:
+                        with open(os.path.join(cand, "assumptions.json"), encoding="utf-8") as f:
+                            snapshot_data = json.load(f)
+                        break
+                    except Exception:
+                        pass
+            if not snapshot_data:
+                try:
+                    with open(os.path.join(_DATA_DIR, "assumption-defaults.json"), encoding="utf-8") as f:
+                        snapshot_data = json.load(f)
+                except Exception:
+                    pass
+
+            category_labels = {
+                "compute_sizing": "Compute Sizing",
+                "licensing": "Licensing",
+                "storage": "Storage",
+                "networking": "Networking",
+                "commitment": "Commitment",
+                "pricing_policy": "Pricing Policy",
+                "other": "Other",
+            }
+            ordered_cats = ["compute_sizing", "licensing", "storage", "networking", "commitment", "pricing_policy", "other"]
+
+            key_cats = snapshot_data.get("categories", {})
+            if "items" in snapshot_data and isinstance(snapshot_data["items"], list):
+                for it in snapshot_data["items"]:
+                    if isinstance(it, dict) and "key" in it and "category" in it:
+                        key_cats[it["key"]] = it["category"]
+
+            def infer_cat(b):
+                bl = b.lower()
+                for k, c in key_cats.items():
+                    if k in bl:
+                        return c
+                if any(w in bl for w in ["vcpu", "ram", "cpu", "compute", "dpu", "acu", "shape", "instance"]):
+                    return "compute_sizing"
+                if any(w in bl for w in ["license", "licence", "os", "byol", "oracle", "suse", "rhel"]):
+                    return "licensing"
+                if any(w in bl for w in ["storage", "disk", "iops", "throughput", "pd-", "volume"]):
+                    return "storage"
+                if any(w in bl for w in ["network", "nat", "egress", "bandwidth", "ip"]):
+                    return "networking"
+                if any(w in bl for w in ["cud", "sp", "ri", "discount", "spot", "savings plan", "commitment"]):
+                    return "commitment"
+                if any(w in bl for w in ["currency", "vintage", "policy", "on-demand"]):
+                    return "pricing_policy"
+                return "other"
+
+            assump_rows_html = ""
             if "is_assumption" in _m2g_cols:
                 assump_rows = conn.execute("""
                     SELECT DISTINCT
@@ -1781,28 +1834,85 @@ def main():
                     for basis, svc, cnt in assump_rows:
                         grouped_assumptions[basis].append(f"{svc} ({cnt} row{'s' if cnt != 1 else ''})")
 
+                    cat_groups = {c: [] for c in ordered_cats}
+                    for basis, svcs in grouped_assumptions.items():
+                        c = infer_cat(basis)
+                        if c not in cat_groups:
+                            c = "other"
+                        cat_groups[c].append((basis, svcs))
+
                     assump_table_rows = []
-                    for i, (basis, svcs) in enumerate(grouped_assumptions.items(), 1):
+                    item_idx = 1
+                    for c in ordered_cats:
+                        items = cat_groups[c]
+                        if not items:
+                            continue
+                        cat_title = category_labels.get(c, c.replace('_', ' ').title())
                         assump_table_rows.append(f"""
-                        <tr>
-                          <td style="font-weight:600">*{i}</td>
-                          <td><b>{_html.escape(basis)}</b></td>
-                          <td>{_html.escape(', '.join(svcs))}</td>
+                        <tr style="background: rgba(255,255,255,0.04)">
+                          <td colspan="3" style="font-weight:700; color:#00C2BB; padding: 8px 12px; text-transform: uppercase; font-size: 11px; letter-spacing: 0.05em;">
+                            {_html.escape(cat_title)} ({len(items)})
+                          </td>
                         </tr>
                         """)
+                        for basis, svcs in items:
+                            assump_table_rows.append(f"""
+                            <tr>
+                              <td style="font-weight:600">*{item_idx}</td>
+                              <td><b>{_html.escape(basis)}</b></td>
+                              <td>{_html.escape(', '.join(svcs))}</td>
+                            </tr>
+                            """)
+                            item_idx += 1
                     assump_rows_html = "\n".join(assump_table_rows)
-                    assumptions_block_html = f"""
+
+            if not assump_rows_html and snapshot_data.get("items"):
+                cat_items = {c: [] for c in ordered_cats}
+                for it in snapshot_data["items"]:
+                    c = it.get("category", "other")
+                    if c not in cat_items:
+                        c = "other"
+                    cat_items[c].append(it)
+                assump_table_rows = []
+                item_idx = 1
+                for c in ordered_cats:
+                    items = cat_items[c]
+                    if not items:
+                        continue
+                    cat_title = category_labels.get(c, c.replace('_', ' ').title())
+                    assump_table_rows.append(f"""
+                    <tr style="background: rgba(255,255,255,0.04)">
+                      <td colspan="3" style="font-weight:700; color:#00C2BB; padding: 8px 12px; text-transform: uppercase; font-size: 11px; letter-spacing: 0.05em;">
+                        {_html.escape(cat_title)} ({len(items)})
+                      </td>
+                    </tr>
+                    """)
+                    for it in items:
+                        title_val = f"{it.get('title', it['key'])}: {it.get('value')} {it.get('unit', '')}"
+                        rat = it.get('rationale', '')
+                        assump_table_rows.append(f"""
+                        <tr>
+                          <td style="font-weight:600">*{item_idx}</td>
+                          <td><b>{_html.escape(title_val)}</b></td>
+                          <td>{_html.escape(rat)}</td>
+                        </tr>
+                        """)
+                        item_idx += 1
+                assump_rows_html = "\n".join(assump_table_rows)
+
+            if assump_rows_html:
+                assumptions_block_html = f"""
 <div class="assumptions-section" style="margin-top:28px">
   <h3>* Pricing Assumptions</h3>
   <p class="section-meta">
     Specific line items in this bill are projected based on documented sizing or ratio assumptions.
-    Rows carrying assumptions are marked with an asterisk (<b>*</b>) in the detailed tables.
+    Rows carrying assumptions are grouped by category below.
   </p>
   <div class="table-scroll"><table>
     <tr>
       <th style="width:40px">#</th>
       <th>Assumption &amp; Basis</th>
-      <th>Applied To Services</th>
+      <th>Applied Details</th>
     </tr>
     {assump_rows_html}
   </table></div>

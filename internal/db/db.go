@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS assumptions (
     unit          TEXT,
     title         TEXT NOT NULL,
     rationale     TEXT NOT NULL,
+    category      TEXT NOT NULL DEFAULT 'other',
     scope         TEXT NOT NULL DEFAULT 'global',
     updated_by    TEXT,
     updated_at    DATETIME DEFAULT (datetime('now'))
@@ -248,9 +249,9 @@ func Open(path string, remoteURL ...string) (*DB, error) {
 		`ALTER TABLE jobs ADD COLUMN engine TEXT`,
 		`ALTER TABLE jobs ADD COLUMN engine_version TEXT`,
 		`ALTER TABLE jobs ADD COLUMN gcp_od REAL`,
-		`ALTER TABLE deleted_jobs ADD COLUMN gcp_od REAL`,
 		`ALTER TABLE users ADD COLUMN default_export_format TEXT DEFAULT 'html'`,
 		`ALTER TABLE users ADD COLUMN default_engine TEXT DEFAULT ''`,
+		`ALTER TABLE assumptions ADD COLUMN category TEXT NOT NULL DEFAULT 'other'`,
 		`CREATE TABLE IF NOT EXISTS uploaded_bills (
 			content_hash TEXT PRIMARY KEY,
 			input_ext    TEXT NOT NULL,
@@ -327,20 +328,35 @@ func Open(path string, remoteURL ...string) (*DB, error) {
 		}
 	}
 
+	// Backfill assumption categories for pre-existing assumption rows
+	var categoryBackfillApplied int
+	if err := conn.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE name = 'backfill_assumption_categories_2026_10'`).Scan(&categoryBackfillApplied); err == nil && categoryBackfillApplied == 0 {
+		tx, err := conn.Begin()
+		if err == nil {
+			_, _ = tx.Exec(`
+				UPDATE assumptions SET category = 'compute_sizing' WHERE key IN ('glue_dpu_vcpu', 'glue_dpu_ram_gib', 'aurora_acu_vcpu', 'aurora_acu_ram_gib', 'lambda_mb_per_vcpu');
+				UPDATE assumptions SET category = 'commitment' WHERE key IN ('aws_ri_1yr_discount_pct', 'aws_ri_3yr_discount_pct', 'aws_sp_discount_pct', 'aws_spot_discount_pct');
+				UPDATE assumptions SET category = 'other' WHERE key = 'looker_studio_pro_seat_usd';
+				INSERT INTO schema_migrations (name, applied_at) VALUES ('backfill_assumption_categories_2026_10', datetime('now'));
+			`)
+			_ = tx.Commit()
+		}
+	}
+
 	// Seed assumptions table with today's values (INSERT OR IGNORE — never
 	// overwrite an admin's edit on restart).
 	if _, err := conn.Exec(`
-		INSERT OR IGNORE INTO assumptions (key, value, default_value, min_value, max_value, unit, title, rationale) VALUES
-			('glue_dpu_vcpu', 4.0, 4.0, 1.0, 32.0, 'vCPU', 'Glue DPU to vCPU', '1 AWS Glue standard DPU (G.1X worker) = 4 vCPU per AWS Glue worker-type spec'),
-			('glue_dpu_ram_gib', 16.0, 16.0, 1.0, 256.0, 'GiB', 'Glue DPU to RAM', '1 AWS Glue standard DPU (G.1X worker) = 16 GiB per AWS Glue worker-type spec'),
-			('looker_studio_pro_seat_usd', 9.0, 9.0, 0.0, 100.0, 'USD/user/month', 'Looker Studio Pro seat rate', '$9/user/mo is Looker Studio Pro published list price'),
-			('aurora_acu_vcpu', 2.0, 2.0, 0.1, 4.0, 'vCPU', 'Aurora ACU to vCPU', '1 Aurora Serverless v2 ACU ≈ 2 vCPU (empirical: 16 ACU ≈ 4 vCPU ≈ db.r5.xlarge)'),
-			('aurora_acu_ram_gib', 16.0, 16.0, 0.5, 64.0, 'GiB', 'Aurora ACU to RAM', '1 Aurora Serverless v2 ACU ≈ 16 GiB RAM (empirical: 16 ACU ≈ 32 GiB ≈ db.r5.xlarge)'),
-			('lambda_mb_per_vcpu', 1769.0, 1769.0, 512.0, 10240.0, 'MB', 'Lambda MB to vCPU ratio', 'AWS Lambda allocates 1 vCPU per 1,769 MB of memory'),
-			('aws_ri_1yr_discount_pct', 0.38, 0.38, 0.0, 0.90, 'fraction', 'AWS 1-Year RI Discount', 'Published typical AWS 1-year reserved instance discount rate (~38%)'),
-			('aws_ri_3yr_discount_pct', 0.52, 0.52, 0.0, 0.90, 'fraction', 'AWS 3-Year RI Discount', 'Published typical AWS 3-year reserved instance discount rate (~52%)'),
-			('aws_sp_discount_pct', 0.30, 0.30, 0.0, 0.90, 'fraction', 'AWS Savings Plans Discount', 'Published typical AWS Compute Savings Plans discount rate (~30%)'),
-			('aws_spot_discount_pct', 0.70, 0.70, 0.0, 0.95, 'fraction', 'AWS Spot Discount', 'Published typical AWS Spot instance discount rate (~70%)')
+		INSERT OR IGNORE INTO assumptions (key, value, default_value, min_value, max_value, unit, title, rationale, category) VALUES
+			('glue_dpu_vcpu', 4.0, 4.0, 1.0, 32.0, 'vCPU', 'Glue DPU to vCPU', '1 AWS Glue standard DPU (G.1X worker) = 4 vCPU per AWS Glue worker-type spec', 'compute_sizing'),
+			('glue_dpu_ram_gib', 16.0, 16.0, 1.0, 256.0, 'GiB', 'Glue DPU to RAM', '1 AWS Glue standard DPU (G.1X worker) = 16 GiB per AWS Glue worker-type spec', 'compute_sizing'),
+			('looker_studio_pro_seat_usd', 9.0, 9.0, 0.0, 100.0, 'USD/user/month', 'Looker Studio Pro seat rate', '$9/user/mo is Looker Studio Pro published list price', 'other'),
+			('aurora_acu_vcpu', 2.0, 2.0, 0.1, 4.0, 'vCPU', 'Aurora ACU to vCPU', '1 Aurora Serverless v2 ACU ≈ 2 vCPU (empirical: 16 ACU ≈ 4 vCPU ≈ db.r5.xlarge)', 'compute_sizing'),
+			('aurora_acu_ram_gib', 16.0, 16.0, 0.5, 64.0, 'GiB', 'Aurora ACU to RAM', '1 Aurora Serverless v2 ACU ≈ 16 GiB RAM (empirical: 16 ACU ≈ 32 GiB ≈ db.r5.xlarge)', 'compute_sizing'),
+			('lambda_mb_per_vcpu', 1769.0, 1769.0, 512.0, 10240.0, 'MB', 'Lambda MB to vCPU ratio', 'AWS Lambda allocates 1 vCPU per 1,769 MB of memory', 'compute_sizing'),
+			('aws_ri_1yr_discount_pct', 0.38, 0.38, 0.0, 0.90, 'fraction', 'AWS 1-Year RI Discount', 'Published typical AWS 1-year reserved instance discount rate (~38%)', 'commitment'),
+			('aws_ri_3yr_discount_pct', 0.52, 0.52, 0.0, 0.90, 'fraction', 'AWS 3-Year RI Discount', 'Published typical AWS 3-year reserved instance discount rate (~52%)', 'commitment'),
+			('aws_sp_discount_pct', 0.30, 0.30, 0.0, 0.90, 'fraction', 'AWS Savings Plans Discount', 'Published typical AWS Compute Savings Plans discount rate (~30%)', 'commitment'),
+			('aws_spot_discount_pct', 0.70, 0.70, 0.0, 0.95, 'fraction', 'AWS Spot Discount', 'Published typical AWS Spot instance discount rate (~70%)', 'commitment')
 			-- Cognito MAU estimation is LLM-guided with no deterministic call site; re-add this key when a Cognito mapper exists.
 	`); err != nil {
 		return nil, fmt.Errorf("seed assumptions: %w", err)
@@ -387,6 +403,27 @@ func (d *DB) ExecForTest(query string, args ...interface{}) (sql.Result, error) 
 	return d.conn.Exec(query, args...)
 }
 
+// AssumptionCategories is the canonical closed list of assumption categories.
+var AssumptionCategories = []string{
+	"compute_sizing",
+	"licensing",
+	"storage",
+	"networking",
+	"commitment",
+	"pricing_policy",
+	"other",
+}
+
+// IsValidAssumptionCategory reports whether cat is a recognized category.
+func IsValidAssumptionCategory(cat string) bool {
+	for _, c := range AssumptionCategories {
+		if c == cat {
+			return true
+		}
+	}
+	return false
+}
+
 // Assumption represents a single pricing assumption row.
 type Assumption struct {
 	Key          string  `json:"key"`
@@ -397,6 +434,7 @@ type Assumption struct {
 	Unit         string  `json:"unit"`
 	Title        string  `json:"title"`
 	Rationale    string  `json:"rationale"`
+	Category     string  `json:"category"`
 	Scope        string  `json:"scope"`
 	UpdatedBy    string  `json:"updated_by,omitempty"`
 	UpdatedAt    string  `json:"updated_at,omitempty"`
@@ -404,7 +442,7 @@ type Assumption struct {
 
 // GetAssumptions returns all assumption rows.
 func (d *DB) GetAssumptions() ([]*Assumption, error) {
-	rows, err := d.conn.Query(`SELECT key, value, default_value, min_value, max_value, unit, title, rationale, scope, COALESCE(updated_by,''), COALESCE(updated_at,'') FROM assumptions ORDER BY key`)
+	rows, err := d.conn.Query(`SELECT key, value, default_value, min_value, max_value, unit, title, rationale, category, scope, COALESCE(updated_by,''), COALESCE(updated_at,'') FROM assumptions ORDER BY key`)
 	if err != nil {
 		return nil, err
 	}
@@ -412,12 +450,33 @@ func (d *DB) GetAssumptions() ([]*Assumption, error) {
 	var assumptions []*Assumption
 	for rows.Next() {
 		var a Assumption
-		if err := rows.Scan(&a.Key, &a.Value, &a.DefaultValue, &a.MinValue, &a.MaxValue, &a.Unit, &a.Title, &a.Rationale, &a.Scope, &a.UpdatedBy, &a.UpdatedAt); err != nil {
+		if err := rows.Scan(&a.Key, &a.Value, &a.DefaultValue, &a.MinValue, &a.MaxValue, &a.Unit, &a.Title, &a.Rationale, &a.Category, &a.Scope, &a.UpdatedBy, &a.UpdatedAt); err != nil {
 			return nil, err
 		}
 		assumptions = append(assumptions, &a)
 	}
 	return assumptions, nil
+}
+
+// CreateAssumption inserts a new assumption row, validating category.
+func (d *DB) CreateAssumption(a *Assumption, createdBy string) error {
+	if a == nil {
+		return fmt.Errorf("nil assumption")
+	}
+	if a.Category == "" {
+		a.Category = "other"
+	}
+	if !IsValidAssumptionCategory(a.Category) {
+		return fmt.Errorf("invalid category: %s", a.Category)
+	}
+	if a.Scope == "" {
+		a.Scope = "global"
+	}
+	_, err := d.conn.Exec(`
+		INSERT INTO assumptions (key, value, default_value, min_value, max_value, unit, title, rationale, category, scope, updated_by, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+	`, a.Key, a.Value, a.DefaultValue, a.MinValue, a.MaxValue, a.Unit, a.Title, a.Rationale, a.Category, a.Scope, createdBy)
+	return err
 }
 
 // AssumptionChange represents a single row in the assumption_changes audit table.
@@ -452,7 +511,7 @@ func (d *DB) GetAssumptionHistory() ([]*AssumptionChange, error) {
 // UpdateAssumption updates an assumption value within bounds, records the
 // change in assumption_changes, and returns the new version hash. All in one
 // transaction.
-func (d *DB) UpdateAssumption(key string, value float64, reason, changedBy string) (string, error) {
+func (d *DB) UpdateAssumption(key string, value float64, reason, changedBy string, category ...string) (string, error) {
 	// Validate bounds
 	var minV, maxV float64
 	err := d.conn.QueryRow(`SELECT min_value, max_value FROM assumptions WHERE key = ?`, key).Scan(&minV, &maxV)
@@ -466,6 +525,14 @@ func (d *DB) UpdateAssumption(key string, value float64, reason, changedBy strin
 		return "", fmt.Errorf("value %g out of range [%g, %g]", value, minV, maxV)
 	}
 
+	cat := ""
+	if len(category) > 0 && category[0] != "" {
+		cat = category[0]
+		if !IsValidAssumptionCategory(cat) {
+			return "", fmt.Errorf("invalid category: %s", cat)
+		}
+	}
+
 	tx, err := d.conn.Begin()
 	if err != nil {
 		return "", err
@@ -477,8 +544,14 @@ func (d *DB) UpdateAssumption(key string, value float64, reason, changedBy strin
 		return "", err
 	}
 
-	if _, err := tx.Exec(`UPDATE assumptions SET value = ?, updated_by = ?, updated_at = datetime('now') WHERE key = ?`, value, changedBy, key); err != nil {
-		return "", err
+	if cat != "" {
+		if _, err := tx.Exec(`UPDATE assumptions SET value = ?, category = ?, updated_by = ?, updated_at = datetime('now') WHERE key = ?`, value, cat, changedBy, key); err != nil {
+			return "", err
+		}
+	} else {
+		if _, err := tx.Exec(`UPDATE assumptions SET value = ?, updated_by = ?, updated_at = datetime('now') WHERE key = ?`, value, changedBy, key); err != nil {
+			return "", err
+		}
 	}
 	if _, err := tx.Exec(`INSERT INTO assumption_changes (key, old_value, new_value, reason, changed_by) VALUES (?, ?, ?, ?, ?)`, key, oldValue, value, reason, changedBy); err != nil {
 		return "", err

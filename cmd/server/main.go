@@ -278,6 +278,7 @@ func main() {
 			r.Get("/api/admin/audit", jobHandler.AdminAuditLog)
 			r.Get("/api/admin/analytics", jobHandler.AdminAnalytics)
 			r.Get("/api/admin/assumptions", jobHandler.AdminGetAssumptions)
+			r.Post("/api/admin/assumptions", jobHandler.AdminCreateAssumption)
 			r.Put("/api/admin/assumptions/{key}", jobHandler.AdminPutAssumption)
 			r.Get("/api/admin/assumptions/history", jobHandler.AdminGetAssumptionHistory)
 			r.Get("/api/admin/report-settings", jobHandler.AdminGetReportSettings)

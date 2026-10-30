@@ -250,6 +250,7 @@ export interface Assumption {
   unit: string
   title: string
   rationale: string
+  category: string
   scope: string
   updated_by: string
   updated_at: string
@@ -267,6 +268,7 @@ export interface AssumptionHistory {
 
 export interface AssumptionsResponse {
   assumptions: Assumption[]
+  categories?: string[]
   version: string
 }
 
@@ -277,6 +279,7 @@ export async function getAssumptions(): Promise<AssumptionsResponse> {
 export interface PutAssumptionBody {
   value: number
   reason: string
+  category?: string
 }
 
 export async function putAssumption(key: string, body: PutAssumptionBody): Promise<{ key: string; value: number; version: string }> {

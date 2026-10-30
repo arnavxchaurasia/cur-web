@@ -50,17 +50,30 @@ func (s *Spawner) WriteAssumptionsSnapshot(jobDir string) (string, error) {
 		return "", err
 	}
 	values := make(map[string]float64, len(assumptions))
-	for _, a := range assumptions {
+	items := make([]map[string]any, len(assumptions))
+	categories := make(map[string][]string)
+	for i, a := range assumptions {
 		values[a.Key] = a.Value
+		items[i] = map[string]any{
+			"key":       a.Key,
+			"value":     a.Value,
+			"unit":      a.Unit,
+			"title":     a.Title,
+			"rationale": a.Rationale,
+			"category":  a.Category,
+		}
+		categories[a.Category] = append(categories[a.Category], a.Key)
 	}
 	version, err := s.db.AssumptionsVersionHash()
 	if err != nil {
 		return "", err
 	}
 	snapshot := map[string]any{
-		"version":     version,
+		"version":      version,
 		"generated_at": time.Now().UTC().Format(time.RFC3339),
 		"values":       values,
+		"items":        items,
+		"categories":   categories,
 	}
 	data, err := json.MarshalIndent(snapshot, "", "  ")
 	if err != nil {
