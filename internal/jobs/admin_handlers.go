@@ -360,7 +360,7 @@ func (h *Handler) AdminSetUserRole(w http.ResponseWriter, r *http.Request) {
 		currentRole = "viewer"
 	}
 
-	isTargetFacets := strings.HasSuffix(lowerTargetEmail, "@facets.cloud") || strings.HasSuffix(lowerTargetEmail, "@facets.io") || strings.Contains(lowerTargetEmail, "@facets.")
+	isTargetFacets := auth.IsFacetsEmail(lowerTargetEmail)
 	isCallerFacets := sess != nil && sess.IsFacetsEmployee()
 
 	// Guardrail 1: Only a facets admin may grant admin to a non-facets user.
@@ -378,8 +378,7 @@ func (h *Handler) AdminSetUserRole(w http.ResponseWriter, r *http.Request) {
 		}
 		facetsAdminCount := 0
 		for _, u := range users {
-			uEmail := strings.ToLower(u.Email)
-			uFacets := strings.HasSuffix(uEmail, "@facets.cloud") || strings.HasSuffix(uEmail, "@facets.io") || strings.Contains(uEmail, "@facets.")
+			uFacets := auth.IsFacetsEmail(u.Email)
 			if uFacets && u.Role == "admin" {
 				facetsAdminCount++
 			}

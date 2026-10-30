@@ -8,6 +8,8 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"strings"
+
+	"github.com/facets/cur-web/internal/auth"
 )
 
 func hashPassword(password string) string {
@@ -48,7 +50,7 @@ func (d *DB) AuthenticateUser(email, password string) (bool, error) {
 	var role string
 	err := d.conn.QueryRow(`SELECT password_hash, role FROM users WHERE email = ?`, email).Scan(&storedHash, &role)
 	if err == sql.ErrNoRows {
-		isFacets := strings.HasSuffix(email, "@facets.cloud") || strings.HasSuffix(email, "@facets.io") || strings.Contains(email, "@facets.")
+		isFacets := auth.IsFacetsEmail(email)
 		newRole := "viewer"
 		if isFacets {
 			newRole = "admin"

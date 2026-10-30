@@ -63,8 +63,7 @@ func (s *Session) IsFacetsEmployee() bool {
 	if s == nil {
 		return false
 	}
-	lower := strings.ToLower(s.Email)
-	return strings.HasSuffix(lower, "@facets.cloud") || strings.HasSuffix(lower, "@facets.io") || strings.Contains(lower, "@facets.")
+	return IsFacetsEmail(s.Email)
 }
 
 type SessionManager struct {

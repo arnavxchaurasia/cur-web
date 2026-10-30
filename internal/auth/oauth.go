@@ -207,8 +207,7 @@ func (h *OAuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		lowerEmail := strings.ToLower(email)
-		isFacets := strings.HasSuffix(lowerEmail, "@facets.cloud") || strings.HasSuffix(lowerEmail, "@facets.io") || strings.Contains(lowerEmail, "@facets.")
+		isFacets := IsFacetsEmail(email)
 		role := "viewer"
 		if isFacets {
 			role = "admin"
@@ -451,8 +450,7 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	lowerEmail := strings.ToLower(info.Email)
-	isFacets := strings.HasSuffix(lowerEmail, "@facets.cloud") || strings.HasSuffix(lowerEmail, "@facets.io") || strings.Contains(lowerEmail, "@facets.")
+	isFacets := IsFacetsEmail(info.Email)
 	role := "viewer"
 	if isFacets {
 		role = "admin"

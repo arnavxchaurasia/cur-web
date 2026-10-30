@@ -311,7 +311,7 @@ func Open(path string, remoteURL ...string) (*DB, error) {
 			UPDATE users
 			SET role = 'admin', updated_at = datetime('now')
 			WHERE role = 'viewer'
-			  AND (email LIKE '%@facets.cloud' OR email LIKE '%@facets.io' OR email LIKE '%@facets.%')
+			  AND (email LIKE '%@facets.cloud' OR email LIKE '%@facets.io')
 		`); err != nil {
 			tx.Rollback()
 			return nil, err

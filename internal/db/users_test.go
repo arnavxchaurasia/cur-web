@@ -2,7 +2,6 @@ package db_test
 
 import (
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/facets/cur-web/internal/auth"
@@ -40,7 +39,7 @@ func TestFacetsAccountStillAdminOnSecondLogin(t *testing.T) {
 	email := "bob@facets.cloud"
 
 	// Login 1:
-	isFacets := strings.HasSuffix(email, "@facets.cloud") || strings.HasSuffix(email, "@facets.io") || strings.Contains(email, "@facets.")
+	isFacets := auth.IsFacetsEmail(email)
 	role1 := "viewer"
 	if isFacets {
 		role1 = "admin"
