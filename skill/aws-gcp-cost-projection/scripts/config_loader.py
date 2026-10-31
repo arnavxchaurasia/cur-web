@@ -43,6 +43,19 @@ def load_assumptions(job_dir: str | None = None) -> dict:
     Falls back to the committed defaults in data/assumption-defaults.json when
     the snapshot is absent (local runs, older jobs). Never raises.
     """
+    # Fall back to committed defaults
+    defaults_path = os.path.join(_DATA_DIR, "assumption-defaults.json")
+    defaults = {}
+    try:
+        with open(defaults_path, encoding="utf-8") as f:
+            data = json.load(f)
+        dvalues = data.get("values", {})
+        if isinstance(dvalues, dict):
+            defaults = {str(k): float(v) for k, v in dvalues.items()}
+    except (FileNotFoundError, json.JSONDecodeError, OSError, ValueError, TypeError):
+        pass
+
+    res = dict(defaults)
     # Try job snapshot first
     if job_dir:
         snapshot_path = os.path.join(job_dir, "assumptions.json")
@@ -51,21 +64,39 @@ def load_assumptions(job_dir: str | None = None) -> dict:
                 data = json.load(f)
             values = data.get("values", {})
             if isinstance(values, dict) and values:
-                return {str(k): float(v) for k, v in values.items()}
+                res.update({str(k): float(v) for k, v in values.items()})
         except (FileNotFoundError, json.JSONDecodeError, OSError, ValueError, TypeError):
-            pass  # fall through to committed defaults
+            pass
 
-    # Fall back to committed defaults
-    defaults_path = os.path.join(_DATA_DIR, "assumption-defaults.json")
-    try:
-        with open(defaults_path, encoding="utf-8") as f:
-            data = json.load(f)
-        values = data.get("values", {})
-        if isinstance(values, dict):
-            return {str(k): float(v) for k, v in values.items()}
-    except (FileNotFoundError, json.JSONDecodeError, OSError, ValueError, TypeError):
-        pass
-    return {}
+    # Ratio group read validation (Task 4):
+    # A value edited directly in the database or snapshot must never reach a customer's projection
+    # if its resulting ratio is not one GCP actually sells.
+    if "aurora_acu_vcpu" in res and "aurora_acu_ram_gib" in res:
+        vcpu = res["aurora_acu_vcpu"]
+        ram = res["aurora_acu_ram_gib"]
+        if vcpu > 0:
+            ratio = ram / vcpu
+            try:
+                from candidate_pool import get_allowed_ram_per_vcpu_ratios
+                allowed = get_allowed_ram_per_vcpu_ratios()
+            except Exception:
+                allowed = [4.0, 8.0, 16.0]
+
+            is_valid = any(abs(ratio - r) < 1e-3 for r in allowed)
+            if not is_valid:
+                try:
+                    from diagnostics import diag, WARN
+                    diag(WARN, "assumption_ratio_out_of_band", "config_loader",
+                         f"Stored aurora_acu ratio 1:{ratio:.1f} ({vcpu} vCPU, {ram} GiB) is out of band; falling back to default",
+                         job_dir=job_dir)
+                except Exception:
+                    pass
+                if "aurora_acu_vcpu" in defaults:
+                    res["aurora_acu_vcpu"] = defaults["aurora_acu_vcpu"]
+                if "aurora_acu_ram_gib" in defaults:
+                    res["aurora_acu_ram_gib"] = defaults["aurora_acu_ram_gib"]
+
+    return res
 
 
 def load_report_settings(job_dir: str | None = None) -> dict:

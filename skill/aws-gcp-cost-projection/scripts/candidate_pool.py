@@ -253,6 +253,24 @@ def load_candidate_families(path: str = "candidate_families.yaml") -> dict:
     return _BUILTIN_CANDIDATE_FAMILIES
 
 
+def get_allowed_ram_per_vcpu_ratios(families_catalog: dict | None = None) -> list[float]:
+    """Derive the allowed vCPU:RAM ratios GCP actually sells across predefined families.
+
+    Dynamic: inspects ram_per_vcpu / gb_per_vcpu across candidate families so adding
+    a GCP family automatically expands the allowed ratio set without code changes.
+    """
+    if families_catalog is None:
+        families_catalog = load_candidate_families()
+
+    ratios = set()
+    for entry in families_catalog.values():
+        if isinstance(entry, dict):
+            val = entry.get("ram_per_vcpu") or entry.get("gb_per_vcpu")
+            if val is not None and isinstance(val, (int, float)) and val > 0:
+                ratios.add(float(val))
+    return sorted(ratios)
+
+
 def load_gpu_candidates(path: str = "gpu_candidates.yaml") -> dict:
     with open(path) as f:
         return yaml.safe_load(f)

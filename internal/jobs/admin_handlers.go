@@ -619,7 +619,7 @@ func (h *Handler) AdminPutAssumption(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":"assumption not found"}`, http.StatusNotFound)
 			return
 		}
-		if strings.Contains(msg, "out of range") {
+		if strings.Contains(msg, "out of range") || strings.Contains(msg, "allowed ratios are") {
 			http.Error(w, `{"error":"` + msg + `"}`, http.StatusBadRequest)
 			return
 		}

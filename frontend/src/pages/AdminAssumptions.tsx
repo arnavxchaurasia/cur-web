@@ -32,6 +32,12 @@ const CATEGORY_META: Record<string, { label: string; desc: string }> = {
   other: { label: 'Other', desc: 'General and unclassified assumptions' },
 }
 
+const RATIO_OPTIONS = [
+  { value: '4', label: '1:4 (compute-optimised, C4/N2D)' },
+  { value: '8', label: '1:8 (balanced, N2/N4/E2)' },
+  { value: '16', label: '1:16 (memory-optimised, M3)' },
+]
+
 export function AdminAssumptions({ user }: Readonly<{ user: UserInfo }>) {
   useTitle('Assumptions — admin')
   const [data, setData] = useState<AssumptionsResponse | null>(null)
@@ -67,6 +73,10 @@ export function AdminAssumptions({ user }: Readonly<{ user: UserInfo }>) {
 
   const handleValueChange = (key: string, val: string) => {
     setEdits(prev => ({ ...prev, [key]: { ...prev[key], value: val } }))
+  }
+
+  const handleReasonChange = (key: string, reason: string) => {
+    setEdits(prev => ({ ...prev, [key]: { ...prev[key], reason } }))
   }
 
   const handleSave = async (key: string) => {
@@ -231,24 +241,49 @@ export function AdminAssumptions({ user }: Readonly<{ user: UserInfo }>) {
                                   <div className="text-xs text-gray-500 mt-1 max-w-xs truncate" title={a.rationale}>{a.rationale}</div>
                                 </div>
                               </td>
-                              <td className="px-5 py-4">
+                                <td className="px-5 py-4">
                                 {isEditing ? (
-                                  <div className="flex items-center gap-2">
-                                    <input
-                                      type="number"
-                                      step="any"
-                                      min={a.min_value}
-                                      max={a.max_value}
-                                      value={edit.value}
-                                      onChange={e => handleValueChange(a.key, e.target.value)}
-                                      className="bg-white/[0.05] border border-white/10 rounded px-2.5 py-1.5 text-white w-24 text-sm focus:border-[#645DF6] outline-none"
-                                    />
-                                    {edit.value && !inRange && (
-                                      <span className="text-xs text-red-400">out of range</span>
+                                  <div className="flex flex-col gap-2">
+                                    {a.key === 'aurora_acu_ram_gib' ? (
+                                      <select
+                                        value={edit.value}
+                                        onChange={e => handleValueChange(a.key, e.target.value)}
+                                        className="bg-[#121217] border border-white/10 rounded px-2.5 py-1.5 text-white text-xs focus:border-[#645DF6] outline-none"
+                                      >
+                                        {RATIO_OPTIONS.map(opt => (
+                                          <option key={opt.value} value={opt.value}>
+                                            {opt.label}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    ) : (
+                                      <div className="flex items-center gap-2">
+                                        <input
+                                          type="number"
+                                          step="any"
+                                          min={a.min_value}
+                                          max={a.max_value}
+                                          value={edit.value}
+                                          onChange={e => handleValueChange(a.key, e.target.value)}
+                                          className="bg-white/[0.05] border border-white/10 rounded px-2.5 py-1.5 text-white w-24 text-sm focus:border-[#645DF6] outline-none"
+                                        />
+                                        {edit.value && !inRange && (
+                                          <span className="text-xs text-red-400">out of range</span>
+                                        )}
+                                      </div>
                                     )}
+                                    <input
+                                      type="text"
+                                      placeholder="Reason for change…"
+                                      value={edit.reason}
+                                      onChange={e => handleReasonChange(a.key, e.target.value)}
+                                      className="bg-white/[0.05] border border-white/10 rounded px-2 py-1 text-white text-xs placeholder:text-gray-500 focus:border-[#645DF6] outline-none w-48"
+                                    />
                                   </div>
                                 ) : (
-                                  <span className="font-mono tabular-nums text-[#00C2BB]">{a.value}</span>
+                                  <span className="font-mono tabular-nums text-[#00C2BB]">
+                                    {a.key === 'aurora_acu_ram_gib' ? `1:${a.value} ratio` : a.value}
+                                  </span>
                                 )}
                               </td>
                               <td className="px-5 py-4 text-gray-400 text-xs">{a.unit}</td>

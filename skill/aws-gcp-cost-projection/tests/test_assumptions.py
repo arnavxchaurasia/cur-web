@@ -22,7 +22,7 @@ def test_load_assumptions_returns_snapshot_when_file_exists():
                 "glue_dpu_ram_gib": 24.0,
                 "looker_studio_pro_seat_usd": 12.0,
                 "aurora_acu_vcpu": 3.0,
-                "aurora_acu_ram_gib": 20.0,
+                "aurora_acu_ram_gib": 24.0,
                 "cognito_requests_per_mau": 25.0,
             },
         }
@@ -34,7 +34,7 @@ def test_load_assumptions_returns_snapshot_when_file_exists():
         assert result["glue_dpu_ram_gib"] == 24.0
         assert result["looker_studio_pro_seat_usd"] == 12.0
         assert result["aurora_acu_vcpu"] == 3.0
-        assert result["aurora_acu_ram_gib"] == 20.0
+        assert result["aurora_acu_ram_gib"] == 24.0
         assert result["cognito_requests_per_mau"] == 25.0
 
 
@@ -101,10 +101,31 @@ def test_every_default_key_referenced_in_scripts():
     )
 
 
+def test_load_assumptions_rejects_out_of_band_ratio():
+    """load_assumptions(job_dir) falls back to defaults when stored ratio is out of band."""
+    with tempfile.TemporaryDirectory() as job_dir:
+        # 0.1 vCPU with 64 GiB RAM is 1:640 — not in allowed ratios {4, 8, 16}
+        snapshot = {
+            "version": "bad_ratio",
+            "values": {
+                "aurora_acu_vcpu": 0.1,
+                "aurora_acu_ram_gib": 64.0,
+            },
+        }
+        with open(os.path.join(job_dir, "assumptions.json"), "w") as f:
+            json.dump(snapshot, f)
+
+        result = load_assumptions(job_dir)
+        # Must fall back to default values (2.0 and 16.0 -> 1:8)
+        assert result["aurora_acu_vcpu"] == 2.0
+        assert result["aurora_acu_ram_gib"] == 16.0
+
+
 if __name__ == "__main__":
     test_load_assumptions_returns_snapshot_when_file_exists()
     test_load_assumptions_returns_defaults_when_file_absent()
     test_load_assumptions_returns_defaults_on_malformed_json()
     test_load_assumptions_returns_defaults_on_empty_file()
+    test_load_assumptions_rejects_out_of_band_ratio()
     test_every_default_key_referenced_in_scripts()
     print("All tests passed!")

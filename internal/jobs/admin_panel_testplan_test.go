@@ -350,13 +350,22 @@ func TestSection4_2_AssumptionsValidationAndPersistence(t *testing.T) {
 		assert.True(t, db.IsValidAssumptionCategory(a.Category))
 	}
 
-	// 2. Change aurora_acu_vcpu to a valid value (0.5)
+	// 2. Change aurora_acu_vcpu to a valid value (1.0 -> 16.0 / 1.0 = 16, valid 1:16 ratio)
 	reqValid, _ := http.NewRequestWithContext(ctxWithFullSession("a@facets.cloud", "A", "admin"), "PUT", "/api/admin/assumptions/aurora_acu_vcpu", nil)
 	reqValid = reqValid.WithContext(withChiParam(reqValid.Context(), "key", "aurora_acu_vcpu"))
-	reqValid.Body = ioCloserWrapper(`{"value":0.5,"reason":"AWS doc parity"}`)
+	reqValid.Body = ioCloserWrapper(`{"value":1.0,"reason":"AWS doc parity"}`)
 	recValid := httptest.NewRecorder()
 	h.AdminPutAssumption(recValid, reqValid)
 	assert.Equal(t, http.StatusOK, recValid.Code)
+
+	// 2b. Out-of-band ratio (0.5 vCPU with 16 GiB RAM gives 1:32, not in 1:4, 1:8, 1:16)
+	reqInvalidRatio, _ := http.NewRequestWithContext(ctxWithFullSession("a@facets.cloud", "A", "admin"), "PUT", "/api/admin/assumptions/aurora_acu_vcpu", nil)
+	reqInvalidRatio = reqInvalidRatio.WithContext(withChiParam(reqInvalidRatio.Context(), "key", "aurora_acu_vcpu"))
+	reqInvalidRatio.Body = ioCloserWrapper(`{"value":0.5,"reason":"invalid out-of-band ratio"}`)
+	recInvalidRatio := httptest.NewRecorder()
+	h.AdminPutAssumption(recInvalidRatio, reqInvalidRatio)
+	assert.Equal(t, http.StatusBadRequest, recInvalidRatio.Code)
+	assert.Contains(t, recInvalidRatio.Body.String(), "allowed ratios are 1:4, 1:8, 1:16")
 
 	// 3. Below minimum or above maximum
 	reqMin, _ := http.NewRequestWithContext(ctxWithFullSession("a@facets.cloud", "A", "admin"), "PUT", "/api/admin/assumptions/aurora_acu_vcpu", nil)

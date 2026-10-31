@@ -570,6 +570,40 @@ func (d *DB) UpdateAssumption(key string, value float64, reason, changedBy strin
 		}
 	}
 
+	// Validate ratio groups (Task D):
+	// aurora_acu_vcpu and aurora_acu_ram_gib quotient must correspond to a real GCP machine shape (1:4, 1:8, 1:16)
+	if key == "aurora_acu_vcpu" || key == "aurora_acu_ram_gib" {
+		otherKey := "aurora_acu_ram_gib"
+		if key == "aurora_acu_ram_gib" {
+			otherKey = "aurora_acu_vcpu"
+		}
+		var otherVal float64
+		if err := d.conn.QueryRow(`SELECT value FROM assumptions WHERE key = ?`, otherKey).Scan(&otherVal); err == nil {
+			var vcpu, ram float64
+			if key == "aurora_acu_vcpu" {
+				vcpu = value
+				ram = otherVal
+			} else {
+				vcpu = otherVal
+				ram = value
+			}
+			if vcpu > 0 {
+				ratio := ram / vcpu
+				allowedRatios := []float64{4.0, 8.0, 16.0}
+				validRatio := false
+				for _, r := range allowedRatios {
+					if ratio > r-1e-3 && ratio < r+1e-3 {
+						validRatio = true
+						break
+					}
+				}
+				if !validRatio {
+					return "", fmt.Errorf("%g vCPU : %g GiB is 1:%g; allowed ratios are 1:4, 1:8, 1:16", vcpu, ram, ratio)
+				}
+			}
+		}
+	}
+
 	tx, err := d.conn.Begin()
 	if err != nil {
 		return "", err
