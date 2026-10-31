@@ -1866,40 +1866,6 @@ def main():
                             item_idx += 1
                     assump_rows_html = "\n".join(assump_table_rows)
 
-            if not assump_rows_html and snapshot_data.get("items"):
-                cat_items = {c: [] for c in ordered_cats}
-                for it in snapshot_data["items"]:
-                    c = it.get("category", "other")
-                    if c not in cat_items:
-                        c = "other"
-                    cat_items[c].append(it)
-                assump_table_rows = []
-                item_idx = 1
-                for c in ordered_cats:
-                    items = cat_items[c]
-                    if not items:
-                        continue
-                    cat_title = category_labels.get(c, c.replace('_', ' ').title())
-                    assump_table_rows.append(f"""
-                    <tr style="background: rgba(255,255,255,0.04)">
-                      <td colspan="3" style="font-weight:700; color:#00C2BB; padding: 8px 12px; text-transform: uppercase; font-size: 11px; letter-spacing: 0.05em;">
-                        {_html.escape(cat_title)} ({len(items)})
-                      </td>
-                    </tr>
-                    """)
-                    for it in items:
-                        title_val = f"{it.get('title', it['key'])}: {it.get('value')} {it.get('unit', '')}"
-                        rat = it.get('rationale', '')
-                        assump_table_rows.append(f"""
-                        <tr>
-                          <td style="font-weight:600">*{item_idx}</td>
-                          <td><b>{_html.escape(title_val)}</b></td>
-                          <td>{_html.escape(rat)}</td>
-                        </tr>
-                        """)
-                        item_idx += 1
-                assump_rows_html = "\n".join(assump_table_rows)
-
             if assump_rows_html:
                 assumptions_block_html = f"""
 <div class="assumptions-section" style="margin-top:28px">
