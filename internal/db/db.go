@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"log"
+	"net/url"
 	"strings"
 
 	_ "github.com/tursodatabase/libsql-client-go/libsql" // registers the libsql driver for Turso cloud SQLite
@@ -198,7 +200,23 @@ CREATE TABLE IF NOT EXISTS user_profiles (
     department  TEXT,
     time_zone   TEXT DEFAULT 'UTC',
     updated_at  DATETIME DEFAULT (datetime('now'))
-);`
+);
+
+CREATE TABLE IF NOT EXISTS api_tokens (
+    key_id       TEXT PRIMARY KEY,
+    user_email   TEXT NOT NULL,
+    token_hash   TEXT NOT NULL,
+    name         TEXT NOT NULL DEFAULT '',
+    scopes       TEXT NOT NULL DEFAULT 'jobs:read',
+    created_at   DATETIME NOT NULL DEFAULT (datetime('now')),
+    last_used_at DATETIME,
+    expires_at   DATETIME,
+    revoked_at   DATETIME,
+    created_ip   TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY (user_email) REFERENCES users(email)
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_email);`
 
 // Open opens a database connection. If remoteURL is provided and non-empty (e.g. Turso libsql://),
 // it connects to the cloud libSQL database. Otherwise, it opens the local SQLite file at path.
@@ -417,6 +435,11 @@ func (d *DB) ExecForTest(query string, args ...interface{}) (sql.Result, error) 
 	return d.conn.Exec(query, args...)
 }
 
+// QueryRowForTest returns a *sql.Row for arbitrary SELECTs (test helper only).
+func (d *DB) QueryRowForTest(query string, args ...interface{}) *sql.Row {
+	return d.conn.QueryRow(query, args...)
+}
+
 // AssumptionCategories is the canonical closed list of assumption categories.
 var AssumptionCategories = []string{
 	"compute_sizing",
@@ -602,3 +625,128 @@ func (d *DB) assumptionsVersionHash() (string, error) {
 	sum := sha256.Sum256([]byte(strings.Join(parts, ";")))
 	return hex.EncodeToString(sum[:])[:12], nil
 }
+
+// mergeURLEncodedUserRows collapses ghost rows whose email still carries a
+// URL-encoded "%40" into the genuine row for the decoded address. Runs once,
+// guarded by schema_migrations.
+func mergeURLEncodedUserRows(conn *sql.DB) error {
+	var applied int
+	if err := conn.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE name = 'merge_urlencoded_user_rows_2026_10'`).Scan(&applied); err != nil {
+		return err
+	}
+	if applied != 0 {
+		return nil
+	}
+
+	tx, err := conn.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Find ghost rows whose email contains a literal percent sign.
+	rows, err := tx.Query(`SELECT email, role, admin_granted_by, admin_granted_at, created_at, updated_at FROM users WHERE email LIKE '%\%%' ESCAPE '\'`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type ghost struct {
+		email          string
+		role           string
+		grantedBy      string
+		grantedAt      string
+		createdAt      string
+		updatedAt      string
+	}
+	var ghosts []ghost
+	for rows.Next() {
+		var g ghost
+		var grantedBy, grantedAt sql.NullString
+		if err := rows.Scan(&g.email, &g.role, &grantedBy, &grantedAt, &g.createdAt, &g.updatedAt); err != nil {
+			return err
+		}
+		g.grantedBy = grantedBy.String
+		g.grantedAt = grantedAt.String
+		ghosts = append(ghosts, g)
+	}
+
+	for _, g := range ghosts {
+		decoded, err := url.PathUnescape(g.email)
+		if err != nil {
+			log.Printf("[merge_urlencoded_user_rows] %q: path unescape failed: %v; leaving row alone", g.email, err)
+			continue
+		}
+		if strings.Contains(decoded, "%") {
+			log.Printf("[merge_urlencoded_user_rows] %q: decodes to %q which still contains %%; leaving row alone", g.email, decoded)
+			continue
+		}
+		decoded = strings.ToLower(strings.TrimSpace(decoded))
+		if decoded == "" || !strings.Contains(decoded, "@") || strings.HasPrefix(decoded, "@") || strings.HasSuffix(decoded, "@") {
+			log.Printf("[merge_urlencoded_user_rows] %q: decodes to invalid address %q; leaving row alone", g.email, decoded)
+			continue
+		}
+
+		// Does a genuine row already exist for the decoded address?
+		var genuineRole string
+		var genuineGrantedBy, genuineGrantedAt sql.NullString
+		var genuineCreatedAt, genuineUpdatedAt string
+		err = tx.QueryRow(`SELECT role, admin_granted_by, admin_granted_at, created_at, updated_at FROM users WHERE email = ?`, decoded).Scan(&genuineRole, &genuineGrantedBy, &genuineGrantedAt, &genuineCreatedAt, &genuineUpdatedAt)
+		if err == sql.ErrNoRows {
+			// No genuine row: rename the ghost row to the decoded address.
+			if _, err := tx.Exec(`UPDATE users SET email = ?, updated_at = datetime('now') WHERE email = ?`, decoded, g.email); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`INSERT INTO admin_audit (actor_email, action, target_id, details) VALUES (?, 'user.merge_encoded', ?, ?)`, "system", decoded, fmt.Sprintf("renamed ghost %q to %q (role=%s)", g.email, decoded, g.role)); err != nil {
+				return err
+			}
+			log.Printf("[merge_urlencoded_user_rows] %q -> %q: no genuine row, renamed (role=%s)", g.email, decoded, g.role)
+			continue
+		}
+		if err != nil {
+			return err
+		}
+
+		// Merge: ghost into genuine, then delete ghost.
+		newRole := genuineRole
+		if genuineRole == "viewer" && g.role == "admin" {
+			newRole = "admin"
+		}
+		newGrantedBy := genuineGrantedBy.String
+		if newGrantedBy == "" {
+			newGrantedBy = g.grantedBy
+		}
+		newGrantedAt := genuineGrantedAt.String
+		if newGrantedAt == "" {
+			newGrantedAt = g.grantedAt
+		}
+		// keep later updated_at
+		newUpdatedAt := genuineUpdatedAt
+		if g.updatedAt > newUpdatedAt {
+			newUpdatedAt = g.updatedAt
+		}
+
+		if _, err := tx.Exec(`
+			UPDATE users SET role = ?, admin_granted_by = ?, admin_granted_at = ?, updated_at = ? WHERE email = ?
+		`, newRole, newGrantedBy, newGrantedAt, newUpdatedAt, decoded); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM users WHERE email = ?`, g.email); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT INTO admin_audit (actor_email, action, target_id, details) VALUES (?, 'user.merge_encoded', ?, ?)`, "system", decoded, fmt.Sprintf("merged ghost %q (role=%s) into genuine %q (role=%s -> %s, granted_by=%s)", g.email, g.role, decoded, genuineRole, newRole, newGrantedBy)); err != nil {
+			return err
+		}
+		log.Printf("[merge_urlencoded_user_rows] %q -> %q: merged (role %s -> %s, granted_by=%s)", g.email, decoded, g.role, newRole, newGrantedBy)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	if _, err := conn.Exec(`INSERT INTO schema_migrations (name, applied_at) VALUES ('merge_urlencoded_user_rows_2026_10', datetime('now'))`); err != nil {
+		return err
+	}
+	return nil
+}
+

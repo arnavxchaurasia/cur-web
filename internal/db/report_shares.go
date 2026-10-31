@@ -97,10 +97,3 @@ func (d *DB) DeleteReportShare(token string) error {
 	}
 	return nil
 }
-
-func parseSQLiteTime(s string) (time.Time, error) {
-	if t, err := time.Parse(time.RFC3339, s); err == nil {
-		return t, nil
-	}
-	return time.Parse("2006-01-02 15:04:05", s)
-}
