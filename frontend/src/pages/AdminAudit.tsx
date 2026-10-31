@@ -6,6 +6,7 @@ import type { AuditEntry } from '../api/admin'
 import type { UserInfo } from '../api/auth'
 import { useTitle } from '../lib/useTitle'
 import { parseAdminApiError, type AdminApiErrorState } from '../components/adminError'
+import { BackButton } from '../components/BackButton'
 
 const PAGE_SIZE = 50
 
@@ -57,6 +58,7 @@ export function AdminAudit({ user }: Readonly<{ user: UserInfo }>) {
   return (
     <Layout user={user}>
       <div className="max-w-5xl mx-auto px-6 py-10">
+        <BackButton fallback="/admin" />
         <h1 className="text-2xl font-semibold mb-1">Audit log</h1>
         <p className="text-sm text-gray-500 mb-6">Every admin action, most recent first.</p>
 

@@ -7,6 +7,7 @@ import type { UserInfo } from '../api/auth'
 import { useTitle } from '../lib/useTitle'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { parseAdminApiError, type AdminApiErrorState } from '../components/adminError'
+import { BackButton } from '../components/BackButton'
 
 export function AdminAnalytics({ user }: Readonly<{ user: UserInfo }>) {
   useTitle('Analytics — admin')
@@ -36,6 +37,7 @@ export function AdminAnalytics({ user }: Readonly<{ user: UserInfo }>) {
   return (
     <Layout user={user}>
       <div className="max-w-5xl mx-auto px-6 py-10">
+        <BackButton fallback="/admin" />
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
           <div>
             <h1 className="text-2xl font-semibold mb-1">Analytics</h1>

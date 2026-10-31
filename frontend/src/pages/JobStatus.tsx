@@ -17,6 +17,7 @@ import { JobHealth } from '../components/JobHealth'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { formatMoney } from '../lib/preferencesContext'
 import { JobLogsViewer } from '../components/JobLogsViewer'
+import { BackButton } from '../components/BackButton'
 
 function pctVsAws(gcp: number, aws: number): { label: string; positive: boolean } | null {
   if (!aws || aws <= 0) return null
@@ -539,6 +540,7 @@ export function JobStatus({ user }: Readonly<{ user: UserInfo }>) {
     <Layout user={user}>
       <div className="max-w-5xl mx-auto px-6 py-10 grid gap-8 lg:grid-cols-[1fr_320px]">
         <main className="flex flex-col gap-6">
+          <BackButton fallback="/" />
           <div className="flex flex-wrap items-center justify-between gap-3 anim-fade-in-up">
             <h1 className="text-2xl font-semibold">
               Report for <span className="text-[#645DF6]">{job.prospect}</span>

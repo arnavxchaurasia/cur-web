@@ -4,6 +4,7 @@ import { createTicket, listTickets, updateTicket, type Ticket } from '../api/adm
 import type { UserInfo } from '../api/auth'
 import { useTitle } from '../lib/useTitle'
 import { toast } from 'sonner'
+import { BackButton } from '../components/BackButton'
 
 function statusColor(status: string): string {
   switch (status) {
@@ -123,6 +124,7 @@ export function Tickets({ user }: Readonly<{ user: UserInfo }>) {
   return (
     <Layout user={user}>
       <div className="max-w-5xl mx-auto px-6 py-8">
+        <BackButton fallback={isAdmin ? "/admin" : "/"} />
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Support Tickets</h1>
@@ -130,11 +132,6 @@ export function Tickets({ user }: Readonly<{ user: UserInfo }>) {
               Raise a ticket for anything — billing questions, report issues, feature requests, or general support.
             </p>
           </div>
-          {isAdmin && (
-            <a href="/admin" className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white font-medium border border-white/10 transition-colors text-sm">
-              ← Back to Admin
-            </a>
-          )}
         </div>
 
         {error && (

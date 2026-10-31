@@ -6,6 +6,7 @@ import type { PortfolioSummary } from '../api/facets'
 import type { Job } from '../api/jobs'
 import type { UserInfo } from '../api/auth'
 import { useTitle } from '../lib/useTitle'
+import { BackButton } from '../components/BackButton'
 
 function fmtMoney(v: number) {
   return v.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 })
@@ -310,6 +311,7 @@ export function Facets({ user }: Readonly<{ user: UserInfo }>) {
   return (
     <Layout user={user}>
       <div className="max-w-6xl mx-auto px-6 py-8">
+        <BackButton fallback="/" />
         <div className="mb-6 anim-fade-in-up">
           <h1 className="text-xl font-bold tracking-tight">Facets Internal Tools</h1>
           <p className="text-xs text-gray-500 mt-1">

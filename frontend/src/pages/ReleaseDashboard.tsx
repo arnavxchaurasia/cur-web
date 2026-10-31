@@ -5,6 +5,7 @@ import { listJobs, downloadURL, type Job } from '../api/jobs'
 import type { UserInfo } from '../api/auth'
 import { useTitle } from '../lib/useTitle'
 import { formatMoney } from '../lib/preferencesContext'
+import { BackButton } from '../components/BackButton'
 
 function statusBadge(status: string) {
   switch (status) {
@@ -41,6 +42,7 @@ export function ReleaseDashboard({ user }: Readonly<{ user: UserInfo }>) {
   return (
     <Layout user={user}>
       <div className="max-w-6xl mx-auto px-6 py-8 anim-fade-in-up">
+        <BackButton fallback="/" />
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
           <div>

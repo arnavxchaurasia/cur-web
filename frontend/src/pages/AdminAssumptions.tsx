@@ -10,6 +10,7 @@ import {
 import type { UserInfo } from '../api/auth'
 import { useTitle } from '../lib/useTitle'
 import { toast } from 'sonner'
+import { BackButton } from '../components/BackButton'
 
 const CATEGORY_ORDER = [
   'compute_sizing',
@@ -135,6 +136,7 @@ export function AdminAssumptions({ user }: Readonly<{ user: UserInfo }>) {
   return (
     <Layout user={user}>
       <div className="max-w-5xl mx-auto px-6 py-8">
+        <BackButton fallback="/admin" />
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Pricing Assumptions</h1>

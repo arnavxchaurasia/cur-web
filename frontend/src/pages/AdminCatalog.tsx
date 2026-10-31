@@ -12,6 +12,7 @@ import {
 import type { UserInfo } from '../api/auth'
 import { useTitle } from '../lib/useTitle'
 import { parseAdminApiError, type AdminApiErrorState } from '../components/adminError'
+import { BackButton } from '../components/BackButton'
 
 export function AdminCatalog({ user }: Readonly<{ user: UserInfo }>) {
   useTitle('Catalog — admin')
@@ -69,6 +70,7 @@ export function AdminCatalog({ user }: Readonly<{ user: UserInfo }>) {
   return (
     <Layout user={user}>
       <div className="max-w-2xl mx-auto px-6 py-10">
+        <BackButton fallback="/admin" />
         <h1 className="text-2xl font-semibold mb-1">GCP catalog</h1>
         <p className="text-sm text-gray-500 mb-8">Freshness of the GCP SKU pricing catalog used for projections.</p>
 

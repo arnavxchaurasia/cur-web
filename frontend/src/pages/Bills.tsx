@@ -3,6 +3,7 @@ import { Layout } from '../components/Layout'
 import { listUploadedBills, previewUploadedBill, type UploadedBill, type BillPreviewResponse } from '../api/admin'
 import type { UserInfo } from '../api/auth'
 import { useTitle } from '../lib/useTitle'
+import { BackButton } from '../components/BackButton'
 
 function fmtBytes(bytes: number): string {
   if (bytes === 0) return '0 B'
@@ -83,6 +84,7 @@ export function Bills({ user }: Readonly<{ user: UserInfo }>) {
   return (
     <Layout user={user}>
       <div className="max-w-6xl mx-auto px-6 py-8">
+        <BackButton fallback="/admin" />
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-white">Uploaded Bills</h1>

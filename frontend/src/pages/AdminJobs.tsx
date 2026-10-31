@@ -12,6 +12,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog'
 import { facetsGetLogs } from '../api/facets'
 import { useTitle } from '../lib/useTitle'
 import { toast } from 'sonner'
+import { BackButton } from '../components/BackButton'
 
 const statusColor: Record<string, string> = {
   pending:   'text-gray-400',
@@ -400,6 +401,7 @@ export function AdminJobs({ user }: Readonly<{ user: UserInfo }>) {
   return (
     <Layout user={user}>
       <div className="max-w-6xl mx-auto px-6 py-8">
+        <BackButton fallback="/" />
 
         {/* Top Header & Admin Links */}
         <div className="mb-6 anim-fade-in-up flex items-start justify-between gap-4 flex-wrap">

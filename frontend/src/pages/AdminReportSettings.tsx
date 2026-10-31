@@ -12,6 +12,7 @@ import {
 import type { UserInfo } from '../api/auth'
 import { useTitle } from '../lib/useTitle'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import { BackButton } from '../components/BackButton'
 
 export function AdminReportSettings({ user }: Readonly<{ user: UserInfo }>) {
   useTitle('Report settings — admin')
@@ -66,10 +67,14 @@ export function AdminReportSettings({ user }: Readonly<{ user: UserInfo }>) {
       }
     }
 
-    const reason = editingValue.trim()
+    let reason = editingValue.trim()
     if (!reason) {
-      setError('a reason is required to change a setting')
-      return
+      if (setting.value_type === 'bool') {
+        reason = `Toggled ${setting.key} to ${value}`
+      } else {
+        setError('a reason is required to change a setting')
+        return
+      }
     }
 
     setSaving(setting.key)
@@ -136,6 +141,7 @@ export function AdminReportSettings({ user }: Readonly<{ user: UserInfo }>) {
   return (
     <Layout user={user}>
       <div className="max-w-5xl mx-auto px-6 py-10">
+        <BackButton fallback="/admin" />
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
           <div>
             <h1 className="text-2xl font-semibold mb-1">Report Settings</h1>

@@ -4,6 +4,7 @@ import { getUserProfile, saveUserProfile, type UserProfile } from '../api/auth'
 import type { UserInfo } from '../api/auth'
 import { useTitle } from '../lib/useTitle'
 import { toast } from 'sonner'
+import { BackButton } from '../components/BackButton'
 
 export function Profile({ user }: Readonly<{ user: UserInfo }>) {
   useTitle('Profile')
@@ -64,6 +65,7 @@ export function Profile({ user }: Readonly<{ user: UserInfo }>) {
   return (
     <Layout user={user}>
       <div className="max-w-2xl mx-auto px-6 py-8">
+        <BackButton fallback="/" />
         <div className="mb-8">
           <h1 className="text-2xl font-bold tracking-tight">Profile</h1>
           <p className="text-sm text-gray-400 mt-1">
