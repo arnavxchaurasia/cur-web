@@ -313,6 +313,17 @@ export async function regenerateReport(id: string): Promise<{ id: string; run_id
   return res.json()
 }
 
+export async function recalculateJob(id: string): Promise<{ id: string; run_id: string; status: string; version: string }> {
+  const res = await fetch(`/api/admin/jobs/${encodeURIComponent(id)}/recalculate`, {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || `recalculate failed (${res.status})`)
+  }
+  return res.json()
+}
+
 // ─── Run comparison ───
 
 export interface RunComparison {

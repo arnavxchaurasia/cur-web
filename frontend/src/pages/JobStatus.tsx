@@ -6,7 +6,7 @@ import { RunHistory } from '../components/RunHistory'
 import { Summary } from '../components/Summary'
 import { ContactCard } from '../components/ContactCard'
 import { Reveal } from '../components/Reveal'
-import { getJob, getProgress, listJobs, downloadURL, refineJob, retryJob, cancelJob, deleteJob, getRuns, getSummary, regenerateReport, compareRuns } from '../api/jobs'
+import { getJob, getProgress, listJobs, downloadURL, refineJob, retryJob, cancelJob, deleteJob, getRuns, getSummary, regenerateReport, recalculateJob, compareRuns } from '../api/jobs'
 import { shareJob } from '../api/admin'
 import type { Job, Progress, RunResult } from '../api/jobs'
 import type { UserInfo } from '../api/auth'
@@ -338,6 +338,8 @@ export function JobStatus({ user }: Readonly<{ user: UserInfo }>) {
   const [cancelError, setCancelError] = useState<string | null>(null)
   const [regenerating, setRegenerating] = useState(false)
   const [regenerateError, setRegenerateError] = useState<string | null>(null)
+  const [recalculating, setRecalculating] = useState(false)
+  const [recalculateError, setRecalculateError] = useState<string | null>(null)
   const [comparing, setComparing] = useState(false)
   const [compareError, setCompareError] = useState<string | null>(null)
   const [comparison, setComparison] = useState<any>(null)
@@ -409,6 +411,25 @@ export function JobStatus({ user }: Readonly<{ user: UserInfo }>) {
       setRegenerateError(e instanceof Error ? e.message : String(e))
     } finally {
       setRegenerating(false)
+    }
+  }
+
+  const submitRecalculate = async () => {
+    if (!id) return
+    setRecalculating(true)
+    setRecalculateError(null)
+    try {
+      const result = await recalculateJob(id)
+      if (result) {
+        toast.success('Job recalculated and report regenerated')
+        setRuns(prev => [...prev, { ...result, run_id: result.run_id } as any])
+      } else {
+        setRecalculateError('Recalculate failed')
+      }
+    } catch (e: unknown) {
+      setRecalculateError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setRecalculating(false)
     }
   }
 
@@ -660,6 +681,15 @@ export function JobStatus({ user }: Readonly<{ user: UserInfo }>) {
                       {regenerating ? 'Regenerating…' : 'Regenerate Report'}
                     </button>
                     {regenerateError && <p className="text-xs text-orange-400">{regenerateError}</p>}
+                    <button
+                      onClick={submitRecalculate}
+                      disabled={recalculating}
+                      className="w-full py-2.5 rounded-lg border border-[#00C2BB]/30 text-[#00C2BB] text-xs font-medium hover:bg-[#00C2BB]/10 disabled:opacity-40 transition-colors"
+                      title="Re-run deterministic mapping and pricing pipeline with latest assumptions and rules without re-running ingest or LLM"
+                    >
+                      {recalculating ? 'Recalculating…' : 'Recalculate (Deterministic Chain)'}
+                    </button>
+                    {recalculateError && <p className="text-xs text-orange-400">{recalculateError}</p>}
                     <button
                       onClick={submitCompare}
                       disabled={comparing || runs.length < 2}

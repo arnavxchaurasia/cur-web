@@ -268,6 +268,7 @@ func main() {
 			r.Post("/api/admin/jobs/cancel-all", jobHandler.CancelAll)
 			r.Post("/api/admin/jobs/resume-all", jobHandler.ResumeAll)
 			r.Post("/api/admin/jobs/{id}/regenerate-report", jobHandler.RegenerateReport)
+			r.Post("/api/admin/jobs/{id}/recalculate", jobHandler.Recalculate)
 			r.Get("/api/admin/system/state", jobHandler.SystemState)
 			r.Delete("/api/admin/jobs/{id}", jobHandler.AdminDeleteJob)
 			r.Get("/api/admin/deleted-jobs", jobHandler.AdminListDeletedJobs)

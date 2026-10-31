@@ -916,6 +916,173 @@ func (h *Handler) RegenerateReport(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Recalculate re-runs only the deterministic chain and re-renders report,
+// applying updated assumptions and report settings without re-running ingest or the LLM.
+func (h *Handler) Recalculate(w http.ResponseWriter, r *http.Request) {
+	sess := auth.SessionFromCtx(r.Context())
+	id := chi.URLParam(r, "id")
+	if !isValidJobID(id) {
+		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+		return
+	}
+	job, err := h.db.GetJob(id)
+	if err != nil {
+		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+		return
+	}
+	if !h.canAccess(sess, job) {
+		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+		return
+	}
+	if job.Status != "done" {
+		http.Error(w, `{"error":"can only recalculate a completed job"}`, http.StatusConflict)
+		return
+	}
+
+	jobDir := filepath.Clean(filepath.Join(h.jobsDir, id))
+	h.ensureJobDirRestored(r.Context(), id, jobDir)
+
+	// One at a time per job.
+	regenLocks.mu.Lock()
+	if regenLocks.m[id] {
+		regenLocks.mu.Unlock()
+		http.Error(w, `{"error":"recalculation already in progress for this job"}`, http.StatusConflict)
+		return
+	}
+	regenLocks.m[id] = true
+	defer func() {
+		regenLocks.mu.Lock()
+		delete(regenLocks.m, id)
+		regenLocks.mu.Unlock()
+	}()
+
+	// Check that projection.duckdb exists.
+	dbPath := filepath.Join(jobDir, projectionAuditDir, projectionDuckDB)
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		http.Error(w, `{"error":"job has no projection data; cannot recalculate"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Verify required mapping files exist in projection-audit/mappings so merge_mappings doesn't drop LLM mappings
+	mappingsDir := filepath.Join(jobDir, projectionAuditDir, "mappings")
+	manifestPath := filepath.Join(jobDir, projectionAuditDir, "phase2_manifest.json")
+	if data, err := os.ReadFile(manifestPath); err == nil {
+		var manifest map[string]any
+		if err := json.Unmarshal(data, &manifest); err == nil {
+			for group, meta := range manifest {
+				if strings.HasPrefix(group, "_") {
+					continue
+				}
+				if m, ok := meta.(map[string]any); ok {
+					if needsLLM, _ := m["needs_llm"].(bool); needsLLM {
+						expectedFile := filepath.Join(mappingsDir, group+"_mappings.json")
+						if _, err := os.Stat(expectedFile); os.IsNotExist(err) {
+							http.Error(w, fmt.Sprintf(`{"error":"cannot recalculate: mapping file for %s is missing from job directory"}`, group), http.StatusBadRequest)
+							return
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Snapshot updated assumptions into <jobDir>/assumptions.json
+	assumpVersion := ""
+	if h.spawner != nil {
+		assumpVersion, _ = h.spawner.WriteAssumptionsSnapshot(jobDir)
+	}
+
+	// Write report-settings.json from current DB values
+	settings, err := h.db.GetReportSettings()
+	if err != nil {
+		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
+		return
+	}
+	if settings == nil {
+		settings = []*db.ReportSetting{}
+	}
+	values := make(map[string]string, len(settings))
+	for _, s := range settings {
+		values[s.Key] = s.Value
+	}
+	reportVersion, err := h.db.ReportSettingsVersionHash()
+	if err != nil {
+		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
+		return
+	}
+	values["__version__"] = reportVersion
+	snapshot := map[string]any{
+		"version":      reportVersion,
+		"generated_at": time.Now().UTC().Format(time.RFC3339),
+		"values":       values,
+	}
+	snapshotJSON, err := json.Marshal(snapshot)
+	if err != nil {
+		http.Error(w, `{"error":"failed to build settings snapshot"}`, http.StatusInternalServerError)
+		return
+	}
+	_ = os.WriteFile(filepath.Join(jobDir, "report-settings.json"), append(snapshotJSON, '\n'), 0644)
+
+	// Deterministic chain:
+	// classify_mechanics -> apply_commitment_ignores -> apply_static_mappings ->
+	// merge_mappings -> service_classifier -> apply_rates -> render_report
+	python := pythonBin()
+	scriptsDir := filepath.Join(skill.ResolveDir(), "scripts")
+	chain := [][]string{
+		{filepath.Join(scriptsDir, "classify_mechanics.py"), dbPath},
+		{filepath.Join(scriptsDir, "apply_commitment_ignores.py"), dbPath},
+		{filepath.Join(scriptsDir, "apply_static_mappings.py"), dbPath},
+		{filepath.Join(scriptsDir, "merge_mappings.py"), dbPath, filepath.Join(projectionAuditDir, "mappings")},
+		{filepath.Join(scriptsDir, "service_classifier.py"), dbPath},
+		{filepath.Join(scriptsDir, "apply_rates.py")},
+		{filepath.Join(scriptsDir, "render_report.py")},
+	}
+
+	logFilePath := filepath.Join(jobDir, "recalculate.log")
+	logFile, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		http.Error(w, `{"error":"could not open recalculate log"}`, http.StatusInternalServerError)
+		return
+	}
+	defer logFile.Close()
+
+	for _, step := range chain {
+		cmd := exec.Command(python, step...)
+		cmd.Dir = jobDir
+		cmd.Env = append(os.Environ(),
+			"SKILL_DIR="+skill.ResolveDir(),
+			"PYTHONPATH="+scriptsDir,
+			"JOB_DIR="+jobDir,
+		)
+		cmd.Stdout = logFile
+		cmd.Stderr = logFile
+		if err := cmd.Run(); err != nil {
+			slog.Error("recalculate step failed", "job_id", id, "step", step[0], "err", err)
+			http.Error(w, fmt.Sprintf(`{"error":"recalculation failed at step %s"}`, filepath.Base(step[0])), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	version := assumpVersion
+	if version == "" {
+		version = reportVersion
+	}
+
+	changedBy := ""
+	if sess != nil && sess.Email != "" {
+		changedBy = sess.Email
+	}
+	_ = h.db.LogAdminAction(changedBy, "recalculate_job", id, version)
+
+	w.Header().Set(contentTypeHeader, contentTypeJSON)
+	json.NewEncoder(w).Encode(map[string]any{
+		"id":      id,
+		"run_id":  version,
+		"status":  "recalculated",
+		"version": version,
+	})
+}
+
 func (h *Handler) Refine(w http.ResponseWriter, r *http.Request) {
 	sess := auth.SessionFromCtx(r.Context())
 	id := chi.URLParam(r, "id")

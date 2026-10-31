@@ -65,6 +65,7 @@ func buildTestRouter(database *db.DB, jobsDir string, adminEmails []string) http
 			r.Post("/api/admin/jobs/cancel-all", jobHandler.CancelAll)
 			r.Post("/api/admin/jobs/resume-all", jobHandler.ResumeAll)
 			r.Post("/api/admin/jobs/{id}/regenerate-report", jobHandler.RegenerateReport)
+			r.Post("/api/admin/jobs/{id}/recalculate", jobHandler.Recalculate)
 			r.Get("/api/admin/system/state", jobHandler.SystemState)
 			r.Delete("/api/admin/jobs/{id}", jobHandler.AdminDeleteJob)
 			r.Get("/api/admin/deleted-jobs", jobHandler.AdminListDeletedJobs)
@@ -152,6 +153,7 @@ func TestSection3_AuthorizationMatrix(t *testing.T) {
 		{"GET", fmt.Sprintf("/api/admin/jobs/%s/diagnostics", jobID)},
 		{"GET", fmt.Sprintf("/api/admin/jobs/%s/diagnostics/records", jobID)},
 		{"POST", fmt.Sprintf("/api/admin/jobs/%s/regenerate-report", jobID)},
+		{"POST", fmt.Sprintf("/api/admin/jobs/%s/recalculate", jobID)},
 		{"GET", "/api/admin/notifications"},
 		{"GET", "/api/admin/notify/status"},
 		{"POST", "/api/admin/notify/test"},

@@ -383,6 +383,17 @@ export async function regenerateReport(id: string): Promise<RegenerateReportResp
   return res.json()
 }
 
+export async function recalculateJob(id: string): Promise<RegenerateReportResponse> {
+  const res = await fetch(`/api/admin/jobs/${encodeURIComponent(id)}/recalculate`, {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || `recalculate failed (${res.status})`)
+  }
+  return res.json()
+}
+
 // ─── Job health diagnostics ───
 
 export interface JobDiagnosticByCode {
