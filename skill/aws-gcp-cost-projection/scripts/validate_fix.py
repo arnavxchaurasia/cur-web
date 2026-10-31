@@ -620,6 +620,15 @@ def passthrough_integrity(con) -> list:
               AND c.aws_amortized_cost > 1
             ORDER BY c.aws_amortized_cost DESC
         """).fetchall()
+        if undeclared:
+            un_rows = len(undeclared)
+            un_usd = sum(float(r[2] or 0.0) for r in undeclared)
+            try:
+                diag(WARN, "passthrough_reason_missing", "validate_fix.py",
+                     f"{un_rows} passthrough row(s) (${un_usd:,.2f}) written with no passthrough_reason",
+                     rows=un_rows, usd=un_usd, phase=4)
+            except Exception:
+                pass
         for key, product, cost in undeclared:
             violations.append({
                 "gate": "passthrough_integrity",
