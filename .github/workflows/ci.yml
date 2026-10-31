@@ -45,3 +45,22 @@ jobs:
       - name: Type-check
         working-directory: frontend
         run: npm run build
+
+  pipeline:
+    name: Pipeline (Python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Kept in step with the runtime dependency list in the Dockerfile; pytest
+      # is test-only and is deliberately not in the image.
+      - name: Install
+        run: pip install --no-cache-dir duckdb pydantic pdfplumber openpyxl pytest
+
+      - name: Test
+        working-directory: skill/aws-gcp-cost-projection
+        run: python -m pytest tests/ -q

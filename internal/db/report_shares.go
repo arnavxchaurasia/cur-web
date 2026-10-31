@@ -3,6 +3,7 @@ package db
 
 import (
 	"database/sql"
+	"log"
 	"time"
 )
 
@@ -43,11 +44,25 @@ func (d *DB) GetReportShare(token string) (*ReportShare, error) {
 		s.CreatedAt = t
 	}
 	if expiresAtStr.Valid && expiresAtStr.String != "" {
-		if t, err := parseSQLiteTime(expiresAtStr.String); err == nil {
-			s.ExpiresAt = &t
-		}
+		s.ExpiresAt = parseShareExpiry(s.Token, expiresAtStr.String)
 	}
 	return &s, nil
+}
+
+// parseShareExpiry turns a stored expiry into a time, failing CLOSED.
+//
+// A share link is served from the public, unauthenticated /api/reports/{token}
+// route, and callers read a nil ExpiresAt as "never expires". So an expiry we
+// cannot parse must not become nil — that would turn an expired link into a
+// permanent one. We return a timestamp already in the past instead, which every
+// caller reads as expired.
+func parseShareExpiry(token, raw string) *time.Time {
+	if t, err := parseSQLiteTime(raw); err == nil {
+		return &t
+	}
+	log.Printf("[report_shares] token %q: unparseable expires_at %q; treating the share as expired", token, raw)
+	past := time.Unix(0, 0).UTC()
+	return &past
 }
 
 // ListReportShares returns all share rows, newest first.
@@ -73,9 +88,7 @@ func (d *DB) ListReportShares() ([]*ReportShare, error) {
 			s.CreatedAt = t
 		}
 		if expiresAtStr.Valid && expiresAtStr.String != "" {
-			if t, err := parseSQLiteTime(expiresAtStr.String); err == nil {
-				s.ExpiresAt = &t
-			}
+			s.ExpiresAt = parseShareExpiry(s.Token, expiresAtStr.String)
 		}
 		shares = append(shares, &s)
 	}
