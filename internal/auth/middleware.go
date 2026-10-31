@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 )
 
@@ -16,10 +17,18 @@ type getRoleFunc any
 func Middleware(sm *SessionManager, getRole getRoleFunc, devBypass ...bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			sess, err := sm.Get(r)
-			if err != nil {
-				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-				return
+			// A bearer-token middleware may have already populated a session in
+			// the request context (see TokenMiddleware). In that case skip the
+			// cookie requirement — the session is the session regardless of how
+			// it was established.
+			sess := SessionFromCtx(r.Context())
+			if sess == nil {
+				s, err := sm.Get(r)
+				if err != nil {
+					http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+					return
+				}
+				sess = s
 			}
 			// Resolve role from the users table on every request so that role
 			// changes (admin demotion/promotion) take effect immediately without
@@ -56,6 +65,14 @@ func RequireAdmin(adminEmails []string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			sess := SessionFromCtx(r.Context())
+			// Admin routes must reject bearer tokens entirely: a long-lived
+			// credential is too much blast radius for the admin surface.
+			if TokenAuthenticated(r.Context()) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				json.NewEncoder(w).Encode(map[string]string{"error": "admin routes require an interactive session"})
+				return
+			}
 			if !sess.IsAdmin(adminEmails) {
 				http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
 				return

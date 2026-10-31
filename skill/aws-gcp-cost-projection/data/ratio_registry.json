@@ -1,0 +1,15 @@
+{
+  "_comment": "Generated from scripts/candidate_pool.py ram_per_vcpu. Regenerate with scripts/gen_ratio_registry.py; tests/test_assumptions.py asserts it stays in sync.",
+  "allowed_ram_per_vcpu": [
+    4.0,
+    8.0,
+    16.0
+  ],
+  "ratio_groups": [
+    {
+      "vcpu_key": "aurora_acu_vcpu",
+      "ram_key": "aurora_acu_ram_gib",
+      "label": "Aurora ACU"
+    }
+  ]
+}

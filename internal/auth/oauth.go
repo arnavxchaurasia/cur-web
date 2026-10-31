@@ -108,16 +108,6 @@ func sanitizeNext(next string) string {
 	return "/"
 }
 
-func fallbackClientID() string {
-	parts := []string{"884448016227", "j1um24k9o0jmki85jfpsf23brtd97sth", "apps.googleusercontent.com"}
-	return parts[0] + "-" + parts[1] + "." + parts[2]
-}
-
-func fallbackClientSecret() string {
-	parts := []string{"GOCSPX", "oFNL9xuIzdF7OFYfwtdMRrYxHEFW"}
-	return parts[0] + "-" + parts[1]
-}
-
 func (h *OAuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	// If a Google OAuth authorization code is present in query parameters
 	// (e.g. Google redirected to /api/auth/login or /login), handle it as a callback immediately!
@@ -248,15 +238,9 @@ func (h *OAuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	if clientID == "" {
 		clientID = os.Getenv("GOOGLE_CLIENT_ID")
 	}
-	if clientID == "" {
-		clientID = fallbackClientID()
-	}
 	clientSecret := h.cfg.ClientSecret
 	if clientSecret == "" {
 		clientSecret = os.Getenv("GOOGLE_CLIENT_SECRET")
-	}
-	if clientSecret == "" {
-		clientSecret = fallbackClientSecret()
 	}
 	redirectURI := h.cfg.RedirectURL
 	if redirectURI == "" {
@@ -380,14 +364,8 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	if cfgCopy.ClientID == "" {
 		cfgCopy.ClientID = os.Getenv("GOOGLE_CLIENT_ID")
 	}
-	if cfgCopy.ClientID == "" {
-		cfgCopy.ClientID = fallbackClientID()
-	}
 	if cfgCopy.ClientSecret == "" {
 		cfgCopy.ClientSecret = os.Getenv("GOOGLE_CLIENT_SECRET")
-	}
-	if cfgCopy.ClientSecret == "" {
-		cfgCopy.ClientSecret = fallbackClientSecret()
 	}
 
 	var token *oauth2.Token

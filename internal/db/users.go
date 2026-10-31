@@ -8,9 +8,21 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"strings"
-
-	"github.com/facets/cur-web/internal/auth"
 )
+
+// isFacetsEmail reports whether email belongs to a Facets-owned domain. It is
+// duplicated here (canonical: internal/auth.IsFacetsEmail) so that db does not
+// import auth, which would create an import cycle via the auth token middleware
+// importing db. Keep the two domain lists in sync.
+func isFacetsEmail(email string) bool {
+	lower := strings.ToLower(strings.TrimSpace(email))
+	at := strings.LastIndex(lower, "@")
+	if at < 0 || at == len(lower)-1 {
+		return false
+	}
+	domain := lower[at+1:]
+	return domain == "facets.cloud" || domain == "facets.io"
+}
 
 func hashPassword(password string) string {
 	salt := make([]byte, 16)
@@ -50,7 +62,7 @@ func (d *DB) AuthenticateUser(email, password string) (bool, error) {
 	var role string
 	err := d.conn.QueryRow(`SELECT password_hash, role FROM users WHERE email = ?`, email).Scan(&storedHash, &role)
 	if err == sql.ErrNoRows {
-		isFacets := auth.IsFacetsEmail(email)
+		isFacets := isFacetsEmail(email)
 		newRole := "viewer"
 		if isFacets {
 			newRole = "admin"

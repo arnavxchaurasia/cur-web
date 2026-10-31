@@ -86,5 +86,59 @@ export async function regenerateUserToken(): Promise<UserTokenResponse> {
   return res.json()
 }
 
+export interface APIToken {
+  key_id: string
+  user_email: string
+  name: string
+  scopes: string[]
+  created_at: string
+  last_used_at?: string
+  expires_at?: string
+  revoked_at?: string
+  display: string
+}
+
+export interface ListUserTokensResponse {
+  tokens: APIToken[]
+}
+
+export interface CreateUserTokenRequest {
+  name: string
+  scopes?: string[]
+  ttl_days?: number
+}
+
+export interface CreateUserTokenResponse {
+  token: string // the full secret, returned only once
+  meta: APIToken
+}
+
+export async function getUserTokens(): Promise<ListUserTokensResponse> {
+  return getJSON<ListUserTokensResponse>('/api/user/tokens')
+}
+
+export async function createUserToken(
+  request: CreateUserTokenRequest,
+): Promise<CreateUserTokenResponse> {
+  const res = await fetch('/api/user/tokens', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || `create token failed (${res.status})`)
+  }
+  return res.json() as Promise<CreateUserTokenResponse>
+}
+
+export async function revokeUserToken(keyId: string): Promise<void> {
+  const res = await fetch(`/api/user/tokens/${keyId}`, { method: 'DELETE' })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || `revoke token failed (${res.status})`)
+  }
+}
+
 export function loginURL() { return '/api/auth/login' }
 export function logoutURL() { return '/api/auth/logout' }

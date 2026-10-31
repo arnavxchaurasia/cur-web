@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -327,8 +328,28 @@ var validRoles = map[string]bool{"viewer": true, "admin": true, "facets": true}
 
 func (h *Handler) AdminSetUserRole(w http.ResponseWriter, r *http.Request) {
 	sess := auth.SessionFromCtx(r.Context())
-	email := chi.URLParam(r, "email")
+	// chi returns the RAW path segment, so an address the client encoded as
+	// "alice%40example.com" arrives still encoded. Storing that verbatim is
+	// what created the ghost "%40" user rows: it conflicts with no existing
+	// row, so the upsert inserted a new one and the real account was never
+	// promoted.
+	rawEmail := chi.URLParam(r, "email")
+	email, unescapeErr := url.PathUnescape(rawEmail)
+	if unescapeErr != nil {
+		http.Error(w, `{"error":"invalid email in path"}`, http.StatusBadRequest)
+		return
+	}
 	lowerTargetEmail := strings.ToLower(strings.TrimSpace(email))
+
+	// A decoded value still has to look like an address before it becomes a
+	// primary key. The '%' check rejects a double-encoded value ("%2540"),
+	// which would survive one unescape and reintroduce the same bug.
+	if lowerTargetEmail == "" || !strings.Contains(lowerTargetEmail, "@") ||
+		strings.HasPrefix(lowerTargetEmail, "@") || strings.HasSuffix(lowerTargetEmail, "@") ||
+		strings.ContainsAny(lowerTargetEmail, " \t\r\n/%") {
+		http.Error(w, `{"error":"invalid email"}`, http.StatusBadRequest)
+		return
+	}
 
 	var body struct {
 		Role string `json:"role"`

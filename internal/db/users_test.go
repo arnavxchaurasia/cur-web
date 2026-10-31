@@ -153,3 +153,88 @@ func TestFacetsUserDemotionSurvivesDbRestarts(t *testing.T) {
 	assert.Equal(t, "viewer", r3, "Demoted role must survive 2nd restart")
 	d3.Close()
 }
+
+// 6. merge URL-encoded ghost row when no genuine row exists → renamed with role intact.
+func TestMergeURLEncodedGhostNoGenuineRow(t *testing.T) {
+	d := newTestDB(t)
+	ghost := "arnavxchaurasia%40gmail.com"
+	_, execErr1 := d.ExecForTest(`INSERT INTO users (email, role, admin_granted_by, admin_granted_at, created_at, updated_at) VALUES (?, 'admin', 'grantor@facets.cloud', datetime('now'), datetime('now'), datetime('now'))`, ghost)
+	require.NoError(t, execErr1)
+
+	require.NoError(t, db.MergeURLEncodedUserRows(d.Conn()))
+
+	role, grantedBy, err := d.GetUserRoleAndGrant("arnavxchaurasia@gmail.com")
+	require.NoError(t, err)
+	assert.Equal(t, "admin", role)
+	assert.Equal(t, "grantor@facets.cloud", grantedBy)
+
+	// No row containing '%' remains.
+	rows, err := d.ExecForTest(`SELECT COUNT(*) FROM users WHERE email LIKE '%\%%' ESCAPE '\'`)
+	require.NoError(t, err)
+	count, _ := rows.RowsAffected()
+	assert.EqualValues(t, 0, count)
+}
+
+// 7. ghost admin + genuine viewer → one row, admin, grant metadata preserved.
+func TestMergeURLEncodedGhostAdminOverridesViewer(t *testing.T) {
+	d := newTestDB(t)
+	_, execErr2 := d.ExecForTest(`INSERT INTO users (email, role, admin_granted_by, admin_granted_at, created_at, updated_at) VALUES (?, 'viewer', NULL, NULL, datetime('now'), datetime('now'))`, "arnav.chaurasia@facets.cloud")
+	require.NoError(t, execErr2)
+	_, execErr3 := d.ExecForTest(`INSERT INTO users (email, role, admin_granted_by, admin_granted_at, created_at, updated_at) VALUES (?, 'admin', 'grantor@facets.cloud', datetime('now'), datetime('now'), datetime('now'))`, "arnav.chaurasia%40facets.cloud")
+	require.NoError(t, execErr3)
+
+	require.NoError(t, db.MergeURLEncodedUserRows(d.Conn()))
+
+	role, grantedBy, err := d.GetUserRoleAndGrant("arnav.chaurasia@facets.cloud")
+	require.NoError(t, err)
+	assert.Equal(t, "admin", role)
+	assert.Equal(t, "grantor@facets.cloud", grantedBy)
+}
+
+// 8. ghost viewer + genuine admin → one row, still admin (no downgrade).
+func TestMergeURLEncodedGhostViewerKeepsAdmin(t *testing.T) {
+	d := newTestDB(t)
+	_, execErr4 := d.ExecForTest(`INSERT INTO users (email, role, admin_granted_by, admin_granted_at, created_at, updated_at) VALUES (?, 'admin', 'grantor@facets.cloud', datetime('now'), datetime('now'), datetime('now'))`, "arnav.chaurasia@facets.cloud")
+	require.NoError(t, execErr4)
+	_, execErr5 := d.ExecForTest(`INSERT INTO users (email, role, admin_granted_by, admin_granted_at, created_at, updated_at) VALUES (?, 'viewer', NULL, NULL, datetime('now'), datetime('now'))`, "arnav.chaurasia%40facets.cloud")
+	require.NoError(t, execErr5)
+
+	require.NoError(t, db.MergeURLEncodedUserRows(d.Conn()))
+
+	role, _, err := d.GetUserRoleAndGrant("arnav.chaurasia@facets.cloud")
+	require.NoError(t, err)
+	assert.Equal(t, "admin", role)
+}
+
+// 9. running the migration twice changes nothing the second time.
+func TestMergeURLEncodedIdempotent(t *testing.T) {
+	d := newTestDB(t)
+	_, execErr6 := d.ExecForTest(`INSERT INTO users (email, role, admin_granted_by, admin_granted_at, created_at, updated_at) VALUES (?, 'admin', 'grantor@facets.cloud', datetime('now'), datetime('now'), datetime('now'))`, "arnavxchaurasia%40gmail.com")
+	require.NoError(t, execErr6)
+
+	require.NoError(t, db.MergeURLEncodedUserRows(d.Conn()))
+	require.NoError(t, db.MergeURLEncodedUserRows(d.Conn()))
+
+	role, _, err := d.GetUserRoleAndGrant("arnavxchaurasia@gmail.com")
+	require.NoError(t, err)
+	assert.Equal(t, "admin", role)
+
+	rows, err := d.ExecForTest(`SELECT COUNT(*) FROM users WHERE email LIKE '%\%%' ESCAPE '\'`)
+	require.NoError(t, err)
+	count, _ := rows.RowsAffected()
+	assert.EqualValues(t, 0, count)
+}
+
+// 10. a row containing '%' that does not decode cleanly is left untouched.
+func TestMergeURLEncodedBadDecodeLeftAlone(t *testing.T) {
+	d := newTestDB(t)
+	bad := "not-an-email%"
+	_, execErr7 := d.ExecForTest(`INSERT INTO users (email, role, admin_granted_by, admin_granted_at, created_at, updated_at) VALUES (?, 'viewer', NULL, NULL, datetime('now'), datetime('now'))`, bad)
+	require.NoError(t, execErr7)
+
+	require.NoError(t, db.MergeURLEncodedUserRows(d.Conn()))
+
+	role, err := d.GetUserRole(bad)
+	require.NoError(t, err)
+	assert.Equal(t, "viewer", role)
+}

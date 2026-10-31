@@ -4,6 +4,7 @@ package jobs
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -1848,4 +1849,104 @@ func (h *Handler) ListUploadedBills(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set(contentTypeHeader, contentTypeJSON)
 	json.NewEncoder(w).Encode(map[string]any{"bills": bills})
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// User API / Access Tokens
+// ─────────────────────────────────────────────────────────────────────────
+
+// ListUserAPITokens returns metadata for all of the caller's API tokens.
+// The full secret is never returned here — only at creation time.
+func (h *Handler) ListUserAPITokens(w http.ResponseWriter, r *http.Request) {
+	sess := auth.SessionFromCtx(r.Context())
+	if sess == nil {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	if auth.TokenAuthenticated(r.Context()) {
+		http.Error(w, `{"error":"token-authenticated requests cannot manage tokens"}`, http.StatusForbidden)
+		return
+	}
+	tokens, err := h.db.ListAPITokens(sess.Email)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"failed to list api tokens: %s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set(contentTypeHeader, contentTypeJSON)
+	json.NewEncoder(w).Encode(map[string]interface{}{"tokens": tokens})
+}
+
+// createTokenRequest is the body of POST /api/user/tokens.
+type createTokenRequest struct {
+	Name    string   `json:"name"`
+	Scopes  []string `json:"scopes"`
+	TTLDays int      `json:"ttl_days"`
+}
+
+// CreateUserAPIToken mints a new API token. The full secret is returned
+// exactly once, in this response, and is not recoverable afterwards.
+func (h *Handler) CreateUserAPIToken(w http.ResponseWriter, r *http.Request) {
+	sess := auth.SessionFromCtx(r.Context())
+	if sess == nil {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	if auth.TokenAuthenticated(r.Context()) {
+		http.Error(w, `{"error":"token-authenticated requests cannot manage tokens"}`, http.StatusForbidden)
+		return
+	}
+	var req createTokenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		http.Error(w, `{"error":"name is required"}`, http.StatusBadRequest)
+		return
+	}
+	ttlDays := req.TTLDays
+	switch ttlDays {
+	case 0, 30, 90, 365:
+	default:
+		ttlDays = 90
+	}
+	ip := r.RemoteAddr
+	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+		if parts := strings.Split(forwarded, ","); len(parts) > 0 {
+			ip = strings.TrimSpace(parts[0])
+		}
+	}
+	full, meta, err := h.db.CreateAPIToken(sess.Email, req.Name, req.Scopes, ttlDays, ip)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"failed to create api token: %s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+	_ = h.db.LogAdminAction(sess.Email, "token.create", meta.KeyID, req.Name)
+	w.Header().Set(contentTypeHeader, contentTypeJSON)
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]interface{}{"token": full, "meta": meta})
+}
+
+// RevokeUserAPIToken soft-revokes a token by setting revoked_at.
+func (h *Handler) RevokeUserAPIToken(w http.ResponseWriter, r *http.Request) {
+	sess := auth.SessionFromCtx(r.Context())
+	if sess == nil {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	if auth.TokenAuthenticated(r.Context()) {
+		http.Error(w, `{"error":"token-authenticated requests cannot manage tokens"}`, http.StatusForbidden)
+		return
+	}
+	keyID := chi.URLParam(r, "key_id")
+	if err := h.db.RevokeAPIToken(keyID, sess.Email); err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, `{"error":"token not found"}`, http.StatusNotFound)
+			return
+		}
+		http.Error(w, fmt.Sprintf(`{"error":"failed to revoke api token: %s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+	_ = h.db.LogAdminAction(sess.Email, "token.revoke", keyID, "")
+	w.WriteHeader(http.StatusNoContent)
 }

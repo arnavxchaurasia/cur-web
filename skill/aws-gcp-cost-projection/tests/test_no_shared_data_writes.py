@@ -31,6 +31,11 @@ ALLOWED_MAINTENANCE_WRITERS = {
     "build_catalog_index.py",
     "prefetch_skus.py",
     "catalog_manager.py",
+    # Developer tool, never invoked by the pipeline: regenerates
+    # data/ratio_registry.json from candidate_pool.py so that Go (admin writes)
+    # and Python (config_loader reads) validate against one source of truth.
+    # test_assumptions.py asserts the generated file stays in sync.
+    "gen_ratio_registry.py",
     # Additional offline maintenance tools (audit finding T4):
     "verify_compute_availability.py",  # offline fetch of gcp_compute_availability.json
     "weekly_catalog_refresh.py",       # Windows Task Scheduler wrapper logging to catalog_refresh.log

@@ -129,3 +129,28 @@ if __name__ == "__main__":
     test_load_assumptions_rejects_out_of_band_ratio()
     test_every_default_key_referenced_in_scripts()
     print("All tests passed!")
+
+def test_ratio_registry_matches_candidate_pool():
+    """data/ratio_registry.json must stay in sync with candidate_pool.py.
+
+    Go validates admin assumption writes against the registry file; Python
+    validates on read against candidate_pool directly. If the two drift, an
+    admin can save a ratio the pipeline will later reject. Regenerate with
+    scripts/gen_ratio_registry.py.
+    """
+    import json
+    import os
+    import sys
+
+    scripts = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts")
+    data = os.path.join(os.path.dirname(scripts), "data")
+    sys.path.insert(0, scripts)
+    from candidate_pool import get_allowed_ram_per_vcpu_ratios
+
+    with open(os.path.join(data, "ratio_registry.json"), encoding="utf-8") as f:
+        registry = json.load(f)
+
+    assert sorted(registry["allowed_ram_per_vcpu"]) == sorted(get_allowed_ram_per_vcpu_ratios()), (
+        "ratio_registry.json is stale; run python scripts/gen_ratio_registry.py"
+    )
+    assert registry["ratio_groups"], "registry must declare at least one ratio group"

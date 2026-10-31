@@ -361,6 +361,12 @@ func Open(path string, remoteURL ...string) (*DB, error) {
 		}
 	}
 
+	// Merge URL-encoded ("%40") ghost user rows created by the AdminSetUserRole
+	// defect before the path param was decoded. Guarded by its own migration row.
+	if err := migrateMergeURLEncodedUserRows(conn); err != nil {
+		return nil, err
+	}
+
 	// Enable assumption and data-gaps sections in pre-existing report_settings rows
 	var assumptionSectionsApplied int
 	if err := conn.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE name = 'enable_assumption_sections_2026_10'`).Scan(&assumptionSectionsApplied); err == nil && assumptionSectionsApplied == 0 {
@@ -428,6 +434,11 @@ func Open(path string, remoteURL ...string) (*DB, error) {
 
 func (d *DB) Close() error {
 	return d.conn.Close()
+}
+
+// Conn returns the underlying *sql.DB, exposed for tests and one-off migrations.
+func (d *DB) Conn() *sql.DB {
+	return d.conn
 }
 
 // ExecForTest executes arbitrary SQL (test helper only).
@@ -570,38 +581,11 @@ func (d *DB) UpdateAssumption(key string, value float64, reason, changedBy strin
 		}
 	}
 
-	// Validate ratio groups (Task D):
-	// aurora_acu_vcpu and aurora_acu_ram_gib quotient must correspond to a real GCP machine shape (1:4, 1:8, 1:16)
-	if key == "aurora_acu_vcpu" || key == "aurora_acu_ram_gib" {
-		otherKey := "aurora_acu_ram_gib"
-		if key == "aurora_acu_ram_gib" {
-			otherKey = "aurora_acu_vcpu"
-		}
-		var otherVal float64
-		if err := d.conn.QueryRow(`SELECT value FROM assumptions WHERE key = ?`, otherKey).Scan(&otherVal); err == nil {
-			var vcpu, ram float64
-			if key == "aurora_acu_vcpu" {
-				vcpu = value
-				ram = otherVal
-			} else {
-				vcpu = otherVal
-				ram = value
-			}
-			if vcpu > 0 {
-				ratio := ram / vcpu
-				allowedRatios := []float64{4.0, 8.0, 16.0}
-				validRatio := false
-				for _, r := range allowedRatios {
-					if ratio > r-1e-3 && ratio < r+1e-3 {
-						validRatio = true
-						break
-					}
-				}
-				if !validRatio {
-					return "", fmt.Errorf("%g vCPU : %g GiB is 1:%g; allowed ratios are 1:4, 1:8, 1:16", vcpu, ram, ratio)
-				}
-			}
-		}
+	// Validate ratio groups against the shared registry (data/ratio_registry.json),
+	// which is generated from candidate_pool.py — so adding a GCP machine family
+	// widens the allowed set here with no change to this file.
+	if err := d.validateRatioGroups(key, value); err != nil {
+		return "", err
 	}
 
 	tx, err := d.conn.Begin()
@@ -660,10 +644,15 @@ func (d *DB) assumptionsVersionHash() (string, error) {
 	return hex.EncodeToString(sum[:])[:12], nil
 }
 
-// mergeURLEncodedUserRows collapses ghost rows whose email still carries a
+// MergeURLEncodedUserRows collapses ghost rows whose email still carries a
 // URL-encoded "%40" into the genuine row for the decoded address. Runs once,
-// guarded by schema_migrations.
-func mergeURLEncodedUserRows(conn *sql.DB) error {
+// guarded by its own migration row. Exported for tests.
+// migrateMergeURLEncodedUserRows runs the merge once at startup, guarded by a
+// schema_migrations row. The merge itself is naturally idempotent — once the
+// ghosts are gone there is nothing left matching '%' — so the guard is only an
+// optimisation, which is why MergeURLEncodedUserRows below is callable
+// directly and does not consult it.
+func migrateMergeURLEncodedUserRows(conn *sql.DB) error {
 	var applied int
 	if err := conn.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE name = 'merge_urlencoded_user_rows_2026_10'`).Scan(&applied); err != nil {
 		return err
@@ -671,7 +660,10 @@ func mergeURLEncodedUserRows(conn *sql.DB) error {
 	if applied != 0 {
 		return nil
 	}
+	return MergeURLEncodedUserRows(conn)
+}
 
+func MergeURLEncodedUserRows(conn *sql.DB) error {
 	tx, err := conn.Begin()
 	if err != nil {
 		return err
@@ -778,7 +770,7 @@ func mergeURLEncodedUserRows(conn *sql.DB) error {
 		return err
 	}
 
-	if _, err := conn.Exec(`INSERT INTO schema_migrations (name, applied_at) VALUES ('merge_urlencoded_user_rows_2026_10', datetime('now'))`); err != nil {
+	if _, err := conn.Exec(`INSERT OR IGNORE INTO schema_migrations (name, applied_at) VALUES ('merge_urlencoded_user_rows_2026_10', datetime('now'))`); err != nil {
 		return err
 	}
 	return nil

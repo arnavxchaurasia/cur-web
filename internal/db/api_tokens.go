@@ -245,6 +245,12 @@ func (d *DB) TouchAPITokenLastUsed(keyID string) error {
 	return err
 }
 
+// TouchAPITokenLastUsedAsync updates last_used_at in a goroutine so the
+// requesting goroutine never waits on the database write lock.
+func (d *DB) TouchAPITokenLastUsedAsync(keyID string) {
+	go d.TouchAPITokenLastUsed(keyID)
+}
+
 func parseSQLiteTime(s string) (time.Time, error) {
 	for _, layout := range []string{
 		"2006-01-02 15:04:05",

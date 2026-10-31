@@ -529,3 +529,97 @@ func TestAdminSetUserRole_RefusesDemotingAdminEmailsEntry(t *testing.T) {
 	assert.Equal(t, "admin", role)
 }
 
+// TestAdminSetUserRole_DecodesEncodedEmail: an encoded email in the path updates
+// the genuine decoded row and leaves no row containing '%'.
+func TestAdminSetUserRole_DecodesEncodedEmail(t *testing.T) {
+	d, err := db.Open(":memory:")
+	require.NoError(t, err)
+	defer d.Close()
+
+	jobsDir := t.TempDir()
+	adminEmails := []string{"a@facets.cloud"}
+	h := jobs.NewHandler(d, jobsDir, jobs.NewSpawner(jobs.SpawnerConfig{}), nil, jobs.NotifyConfig{}, adminEmails)
+
+	require.NoError(t, d.UpsertUserSeen("a@facets.cloud", "admin"))
+	require.NoError(t, d.UpsertUserSeen("alice@example.com", "viewer"))
+
+	req, _ := http.NewRequestWithContext(ctxWithFullSession("a@facets.cloud", "Admin A", "admin"), "POST", "/api/admin/users/alice%40example.com/role", nil)
+	req = req.WithContext(withChiParam(req.Context(), "email", "alice%40example.com"))
+	req.Body = ioCloserWrapper(`{"role":"admin"}`)
+	rec := httptest.NewRecorder()
+	h.AdminSetUserRole(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	role, granter, err := d.GetUserRoleAndGrant("alice@example.com")
+	require.NoError(t, err)
+	assert.Equal(t, "admin", role)
+	assert.Equal(t, "a@facets.cloud", granter)
+
+	// No ghost row containing '%' should exist. (RowsAffected is meaningless
+	// for a SELECT, so read the count out properly.)
+	var count int
+	require.NoError(t, d.Conn().QueryRow(`SELECT COUNT(*) FROM users WHERE email LIKE '%\%%' ESCAPE '\'`).Scan(&count))
+	assert.Equal(t, 0, count, "no URL-encoded ghost row should remain")
+}
+
+// TestAdminSetUserRole_RejectsDoubleEncoded: a double-encoded email is rejected
+// and no row is created.
+func TestAdminSetUserRole_RejectsDoubleEncoded(t *testing.T) {
+	d, err := db.Open(":memory:")
+	require.NoError(t, err)
+	defer d.Close()
+
+	jobsDir := t.TempDir()
+	adminEmails := []string{"a@facets.cloud"}
+	h := jobs.NewHandler(d, jobsDir, jobs.NewSpawner(jobs.SpawnerConfig{}), nil, jobs.NotifyConfig{}, adminEmails)
+
+	require.NoError(t, d.UpsertUserSeen("a@facets.cloud", "admin"))
+
+	req, _ := http.NewRequestWithContext(ctxWithFullSession("a@facets.cloud", "Admin A", "admin"), "POST", "/api/admin/users/alice%2540example.com/role", nil)
+	req = req.WithContext(withChiParam(req.Context(), "email", "alice%2540example.com"))
+	req.Body = ioCloserWrapper(`{"role":"admin"}`)
+	rec := httptest.NewRecorder()
+	h.AdminSetUserRole(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+
+	// No row created, for either the decoded or the raw form.
+	var created int
+	require.NoError(t, d.Conn().QueryRow(
+		`SELECT COUNT(*) FROM users WHERE email IN ('alice@example.com', 'alice%40example.com', 'alice%2540example.com')`,
+	).Scan(&created))
+	assert.Equal(t, 0, created, "a rejected address must create no user row")
+}
+
+// TestAdminSetUserRole_SelfDemotionBlockedViaEncodedPath: self-change via an
+// encoded path is still blocked (the guardrail bypass is closed).
+func TestAdminSetUserRole_SelfDemotionBlockedViaEncodedPath(t *testing.T) {
+	d, err := db.Open(":memory:")
+	require.NoError(t, err)
+	defer d.Close()
+
+	jobsDir := t.TempDir()
+	adminEmails := []string{"alice@example.com"}
+	h := jobs.NewHandler(d, jobsDir, jobs.NewSpawner(jobs.SpawnerConfig{}), nil, jobs.NotifyConfig{}, adminEmails)
+
+	require.NoError(t, d.UpsertUserSeen("alice@example.com", "admin"))
+
+	// Caller is alice@example.com; path is the encoded form of the same address.
+	req, _ := http.NewRequestWithContext(ctxWithFullSession("alice@example.com", "Alice", "admin"), "POST", "/api/admin/users/alice%40example.com/role", nil)
+	req = req.WithContext(withChiParam(req.Context(), "email", "alice%40example.com"))
+	req.Body = ioCloserWrapper(`{"role":"viewer"}`)
+	rec := httptest.NewRecorder()
+	h.AdminSetUserRole(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	var resp map[string]interface{}
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	assert.Contains(t, resp["error"], "cannot change your own role")
+
+	// Stored role unchanged.
+	role, err := d.GetUserRole("alice@example.com")
+	require.NoError(t, err)
+	assert.Equal(t, "admin", role)
+}
+

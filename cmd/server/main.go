@@ -196,6 +196,15 @@ func main() {
 	})
 	shareLimiter := jobs.NewRateLimitMiddleware(60.0/60.0, 60) // 60/min/IP
 
+	// Token creation: 10 per hour per user. Token minting is cheap to abuse
+	// and nobody legitimately creates more than a handful.
+	tokenCreateLimiter := jobs.NewRateLimitMiddlewareWithKey(10.0/3600.0, 10, func(r *http.Request) string {
+		if sess := auth.SessionFromCtx(r.Context()); sess != nil && sess.Email != "" {
+			return "user:" + sess.Email
+		}
+		return ""
+	})
+
 	// Auth (no session required)
 	r.Get("/api/auth/login", loginLimiter(http.HandlerFunc(oauthH.Login)))
 	r.Post("/api/auth/login", loginLimiter(http.HandlerFunc(oauthH.Login)))
@@ -223,26 +232,32 @@ func main() {
 
 	// Authenticated routes
 	r.Group(func(r chi.Router) {
+	// Every /api/ response is per-user (jobs, profile, preferences,
+	// assumptions, and — critically — access tokens). None of it should
+	// ever be cached by a shared proxy, browser heuristic, or CDN.
+	// Vary: Cookie, Authorization is what prevents one user's token
+	// response from being served to another (the reported symptom).
+		r.Use(auth.APICacheControl)
 		// Resolve role per-request from the users table so role changes
 		// (admin demotion/promotion) take effect on the next request without
 		// requiring re-login (WORKORDER §1.1).
 		r.Use(auth.Middleware(sm, database.GetUserRoleAndGrant, cfg.DevAuthBypass))
 		r.Get("/api/auth/me", oauthH.Me)
-		r.Post("/api/jobs", uploadLimiter(jobHandler.Create))
+		r.Post("/api/jobs", auth.RequireScope(db.ScopeJobsWrite)(uploadLimiter(http.HandlerFunc(jobHandler.Create))))
 		r.Get("/api/bills/check", jobHandler.CheckBill)
 		r.Post("/api/jobs/existing-bill", uploadLimiter(jobHandler.CreateFromExistingBill))
 		r.Post("/api/jobs/chunk", jobHandler.UploadChunk)
 		r.Post("/api/jobs/complete-chunked", uploadLimiter(jobHandler.CompleteChunkedUpload))
-		r.Get("/api/jobs", jobHandler.List)
+		r.Get("/api/jobs", auth.RequireScope(db.ScopeJobsRead)(http.HandlerFunc(jobHandler.List)))
 		r.Get("/api/engine-settings", jobHandler.GetEngineSettings)
-		r.Get("/api/jobs/{id}", jobHandler.GetByID)
+		r.Get("/api/jobs/{id}", auth.RequireScope(db.ScopeJobsRead)(http.HandlerFunc(jobHandler.GetByID)))
 		r.Get("/api/jobs/{id}/summary", jobHandler.Summary)
 		r.Get("/api/jobs/{id}/progress", jobHandler.Progress)
 		r.Post("/api/jobs/{id}/cancel", jobHandler.Cancel)
 		r.Post("/api/jobs/{id}/retry", jobHandler.Retry)
 		r.Post("/api/jobs/{id}/refine", jobHandler.Refine)
 		r.Get("/api/jobs/{id}/download", jobHandler.Download)
-		r.Get("/api/jobs/{id}/logs", jobHandler.JobLogs)
+		r.Get("/api/jobs/{id}/logs", auth.RequireScope(db.ScopeJobsRead)(http.HandlerFunc(jobHandler.JobLogs)))
 		r.Get("/api/jobs/{id}/runs", jobHandler.Runs)
 		r.Post("/api/jobs/{id}/share", jobHandler.ShareJob)
 		r.Delete("/api/jobs/{id}", jobHandler.Delete)
@@ -255,9 +270,15 @@ func main() {
 		// User preferences (default engine, default export format, email notifications)
 		r.Get("/api/user/preferences", jobHandler.GetUserPreferences)
 		r.Put("/api/user/preferences", jobHandler.UpdateUserPreferences)
-		// User API token
-		r.Get("/api/user/token", jobHandler.GetUserAPIToken)
-		r.Post("/api/user/token/regenerate", jobHandler.RegenerateUserAPIToken)
+		// User API tokens
+		r.Get("/api/user/tokens", jobHandler.ListUserAPITokens)
+		r.Post("/api/user/tokens", tokenCreateLimiter(jobHandler.CreateUserAPIToken))
+		r.Delete("/api/user/tokens/{key_id}", jobHandler.RevokeUserAPIToken)
+
+		// Token-authenticated API calls are rate limited per key id (600/min)
+		// so one runaway script can't lock a user out of their other
+		// integrations. Cookie-authenticated requests pass through.
+		r.Use(auth.TokenRateLimitMiddleware)
 
 		// Admin-only routes, gated by auth.RequireAdmin in addition to the
 		// session check already applied by this group.
