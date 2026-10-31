@@ -55,9 +55,9 @@ export function AdminUsers({ user }: Readonly<{ user: UserInfo }>) {
 
   const severityTitle = (c: typeof confirm) => {
     if (!c) return ''
-    if (c.severity === 'grant_admin') return `Grant admin access to \`${c.email}\`?`
-    if (c.severity === 'revoke_admin') return `Remove admin access from \`${c.email}\`?`
-    return `Change \`${c.email}\` from ${c.fromRole} to ${c.toRole}?`
+    if (c.severity === 'grant_admin') return `Grant admin access to ${c.email}?`
+    if (c.severity === 'revoke_admin') return `Remove admin access from ${c.email}?`
+    return `Change ${c.email} from ${c.fromRole} to ${c.toRole}?`
   }
 
   const severityBody = (c: typeof confirm) => {
@@ -135,7 +135,7 @@ export function AdminUsers({ user }: Readonly<{ user: UserInfo }>) {
         {users === null && <p className="text-sm text-gray-500 py-12 text-center">Loading…</p>}
         {users !== null && users.length === 0 && <p className="text-sm text-gray-500 py-12 text-center">No users registered yet.</p>}
         {filteredUsers !== null && users !== null && users.length > 0 && filteredUsers.length === 0 && (
-          <p className="text-sm text-gray-500 py-12 text-center">No users matching &ldquo;{search}&rdquo;</p>}
+          <p className="text-sm text-gray-500 py-12 text-center">No users matching &ldquo;{search}&rdquo;</p>
         )}
 
         {filteredUsers && filteredUsers.length > 0 && (
