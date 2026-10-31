@@ -51,6 +51,13 @@ func withTokenAuth(ctx context.Context, keyID string, scopes []string) context.C
 	return context.WithValue(ctx, tokenScopesCtxKey{}, scopes)
 }
 
+// WithTokenAuthForTest marks a context as token-authenticated with the given
+// key id and scopes. Exported for tests in other packages (e.g. the MCP
+// server) that need to simulate a bearer-token request.
+func WithTokenAuthForTest(ctx context.Context, keyID string, scopes []string) context.Context {
+	return withTokenAuth(ctx, keyID, scopes)
+}
+
 // TokenMiddleware authenticates "Authorization: Bearer fct_live_..." and
 // populates the same *Session a cookie login would. Requests with no
 // Authorization header pass through untouched for the cookie middleware.

@@ -603,3 +603,37 @@ export interface AdminNotificationsResponse {
 export async function getAdminNotifications(): Promise<AdminNotificationsResponse> {
   return getJSON<AdminNotificationsResponse>('/api/admin/notifications')
 }
+// ── Notification integrations (email + Slack) ──────────────────────────────
+export interface SecretState { configured: boolean; last4?: string }
+export interface IntegrationsConfig {
+  encryption_available: boolean
+  email: { enabled: boolean; from: string; api_key: SecretState; env_fallback: boolean }
+  slack: { enabled: boolean; webhook_url: SecretState; env_fallback: boolean }
+}
+export interface IntegrationsUpdate {
+  email?: { enabled?: boolean; from?: string; api_key?: string }
+  slack?: { enabled?: boolean; webhook_url?: string }
+}
+
+export async function getIntegrations(): Promise<IntegrationsConfig> {
+  return getJSON<IntegrationsConfig>('/api/admin/integrations')
+}
+
+export async function updateIntegrations(body: IntegrationsUpdate): Promise<IntegrationsConfig> {
+  const res = await fetch('/api/admin/integrations', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error((await res.text()) || `save failed (${res.status})`)
+  return res.json() as Promise<IntegrationsConfig>
+}
+
+export async function testNotify(channel: 'email' | 'slack'): Promise<{ status: string; error?: string }> {
+  const res = await fetch('/api/admin/notify/test', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ channel }),
+  })
+  return res.json() as Promise<{ status: string; error?: string }>
+}

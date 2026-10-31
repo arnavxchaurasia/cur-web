@@ -5117,6 +5117,11 @@ def map_managed_db(rows: list[dict]):
             or "serverless" in ut.lower()
         ):
             product_blob = f"{r.get('product') or ''} {r.get('operation') or ''}".lower()
+            acu_assumption = (
+                f"1 ACU ≈ {_ACU_VCPU:g} vCPU + {_ACU_RAM_GIB:g} GiB "
+                f"(1:{_ACU_RAM_GIB/_ACU_VCPU:g} vCPU:RAM memory-optimized shape, "
+                f"Aurora R-class lineage on Cloud SQL N4)"
+            )
             # Aurora Serverless v2 has no bundled Cloud SQL SKU for PostgreSQL —
             # the real catalog only has unbundled per-vCPU/per-GB PostgreSQL SKUs
             # (confirmed via find-sku.sh), unlike MySQL's bundled-instance sizes.
@@ -5140,11 +5145,6 @@ def map_managed_db(rows: list[dict]):
                 # prices the I/O-Opt rows within ~3% of AWS list (ratio ~0.97).
                 # Fits GCP Cloud SQL N4 custom (supports up to 8 GB/vCPU; 2 vCPU : 16 GiB)
                 # (https://cloud.google.com/sql/docs/mysql/machine-series-overview).
-                acu_assumption = (
-                    f"1 ACU ≈ {_ACU_VCPU:g} vCPU + {_ACU_RAM_GIB:g} GiB "
-                    f"(1:{_ACU_RAM_GIB/_ACU_VCPU:g} vCPU:RAM memory-optimized shape, "
-                    f"Aurora R-class lineage on Cloud SQL N4)"
-                )
                 ram_desc = "Cloud SQL for PostgreSQL: Zonal - RAM"
                 core_sku = resolve_sku(GCP_CLOUD_SQL, core_desc, region)
                 ram_sku = resolve_sku(GCP_CLOUD_SQL, ram_desc, region)
@@ -5190,11 +5190,6 @@ def map_managed_db(rows: list[dict]):
                 # Cloud SQL Zonal guarantee. Matches the treatment the
                 # PostgreSQL branch above already gets; MySQL's bundled-size
                 # code path just never received the same fix.
-                acu_assumption = (
-                    f"1 ACU ≈ {_ACU_VCPU:g} vCPU + {_ACU_RAM_GIB:g} GiB "
-                    f"(1:{_ACU_RAM_GIB/_ACU_VCPU:g} vCPU:RAM memory-optimized shape, "
-                    f"Aurora R-class lineage on Cloud SQL N4)"
-                )
                 engine_note = ""
                 if "mariadb" in product_blob:
                     engine_note = " [engine substitution: Cloud SQL has no native MariaDB offering; priced as MySQL]"

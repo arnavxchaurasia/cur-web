@@ -247,7 +247,7 @@ func (w *Watcher) finalize(jobID string, allowRetry bool, logOffset int64) {
 			userSettings, err := w.db.GetNotificationSettings(job.Owner)
 			emailEnabled := true
 			slackEnabled := false
-			slackURL := w.notify.SlackURL
+			slackURL := w.slackURL()
 			slackChannel := ""
 			if err == nil && userSettings != nil {
 				emailEnabled = userSettings.EmailNotifications
@@ -260,13 +260,13 @@ func (w *Watcher) finalize(jobID string, allowRetry bool, logOffset int64) {
 
 			// Send email if user has email notifications on (default true)
 			if emailEnabled {
-				if err := notify.SendJobReady(w.notify.Email, job.Owner, job.Owner, job.Prospect, jobID, spend); err != nil {
+				if err := notify.SendJobReady(w.emailCfg(), job.Owner, job.Owner, job.Prospect, jobID, spend); err != nil {
 					slog.Info("email notification status", "job_id", jobID, "detail", err.Error())
 				}
 			}
 
 			// Send Slack notification if enabled and webhook exists
-			if (slackEnabled || w.notify.SlackURL != "") && slackURL != "" {
+			if (slackEnabled || w.slackURL() != "") && slackURL != "" {
 				prefix := ""
 				if slackChannel != "" {
 					prefix = fmt.Sprintf("[%s] ", slackChannel)
@@ -293,12 +293,12 @@ func (w *Watcher) finalize(jobID string, allowRetry bool, logOffset int64) {
 		w.recordJobLogDigest(jobID, "initial", jobDir)
 		w.syncRemote(jobID, jobDir)
 		go func() {
-			if err := notify.SendJobFailed(w.notify.Email, job.Owner, job.Owner, job.Prospect); err != nil {
+			if err := notify.SendJobFailed(w.emailCfg(), job.Owner, job.Owner, job.Prospect); err != nil {
 				slog.Warn("SendJobFailed failed", "job_id", jobID, "err", err)
 			}
 		}()
 		go func() {
-			if err := notify.PostJobFailed(w.notify.SlackURL, job.Prospect, job.Owner, jobID); err != nil {
+			if err := notify.PostJobFailed(w.slackURL(), job.Prospect, job.Owner, jobID); err != nil {
 				slog.Warn("PostJobFailed failed", "job_id", jobID, "err", err)
 			}
 		}()
@@ -315,12 +315,12 @@ func (w *Watcher) finalize(jobID string, allowRetry bool, logOffset int64) {
 		slog.Error("job failed", "job_id", jobID, "prospect", job.Prospect, "reason", "quota_exhausted", "attempts", job.Attempts)
 		w.syncRemote(jobID, jobDir)
 		go func() {
-			if err := notify.SendJobFailed(w.notify.Email, job.Owner, job.Owner, job.Prospect); err != nil {
+			if err := notify.SendJobFailed(w.emailCfg(), job.Owner, job.Owner, job.Prospect); err != nil {
 				slog.Warn("SendJobFailed failed", "job_id", jobID, "err", err)
 			}
 		}()
 		go func() {
-			if err := notify.PostJobFailed(w.notify.SlackURL, job.Prospect, job.Owner, jobID); err != nil {
+			if err := notify.PostJobFailed(w.slackURL(), job.Prospect, job.Owner, jobID); err != nil {
 				slog.Warn("PostJobFailed failed", "job_id", jobID, "err", err)
 			}
 		}()
@@ -346,12 +346,12 @@ func (w *Watcher) finalize(jobID string, allowRetry bool, logOffset int64) {
 		w.recordJobLogDigest(jobID, "initial", jobDir)
 		w.syncRemote(jobID, jobDir)
 		go func() {
-			if err := notify.SendJobFailed(w.notify.Email, job.Owner, job.Owner, job.Prospect); err != nil {
+			if err := notify.SendJobFailed(w.emailCfg(), job.Owner, job.Owner, job.Prospect); err != nil {
 				slog.Warn("SendJobFailed failed", "job_id", jobID, "err", err)
 			}
 		}()
 		go func() {
-			if err := notify.PostJobFailed(w.notify.SlackURL, job.Prospect, job.Owner, jobID); err != nil {
+			if err := notify.PostJobFailed(w.slackURL(), job.Prospect, job.Owner, jobID); err != nil {
 				slog.Warn("PostJobFailed failed", "job_id", jobID, "err", err)
 			}
 		}()

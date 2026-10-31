@@ -20,6 +20,7 @@ import (
 	"github.com/facets/cur-web/internal/auth"
 	"github.com/facets/cur-web/internal/db"
 	"github.com/facets/cur-web/internal/metrics"
+	"github.com/facets/cur-web/internal/notify"
 	"github.com/facets/cur-web/internal/skill"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -641,7 +642,7 @@ func (h *Handler) AdminPutAssumption(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if strings.Contains(msg, "out of range") || strings.Contains(msg, "allowed ratios are") {
-			http.Error(w, `{"error":"` + msg + `"}`, http.StatusBadRequest)
+			http.Error(w, `{"error":"`+msg+`"}`, http.StatusBadRequest)
 			return
 		}
 		http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
@@ -776,12 +777,12 @@ func (h *Handler) AdminResetReportSettings(w http.ResponseWriter, r *http.Reques
 // shareRow is the masked representation returned to admins — the token is
 // truncated so a compromised admin session cannot hand out working links.
 type shareRow struct {
-	Token      string     `json:"token"` // first 6 chars only
-	JobID      string     `json:"job_id"`
-	CreatedBy  string     `json:"created_by"`
-	CreatedAt  time.Time  `json:"created_at"`
-	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
-	Expired    bool       `json:"expired"`
+	Token     string     `json:"token"` // first 6 chars only
+	JobID     string     `json:"job_id"`
+	CreatedBy string     `json:"created_by"`
+	CreatedAt time.Time  `json:"created_at"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	Expired   bool       `json:"expired"`
 }
 
 // maskToken shows only the first 6 characters of a share token.
@@ -841,24 +842,171 @@ func (h *Handler) AdminDeleteReportShare(w http.ResponseWriter, r *http.Request)
 
 // AdminNotifyStatus returns notification channel health status.
 func (h *Handler) AdminNotifyStatus(w http.ResponseWriter, r *http.Request) {
+	email := h.emailCfg()
 	status := map[string]any{
 		"email": map[string]any{
-			"configured": h.notify.Email.APIKey != "" && h.notify.Email.From != "",
+			"configured": email.APIKey != "" && email.From != "",
 		},
 		"slack": map[string]any{
-			"configured": h.notify.SlackURL != "",
+			"configured": h.slackURL() != "",
 		},
 	}
 	w.Header().Set(contentTypeHeader, contentTypeJSON)
 	json.NewEncoder(w).Encode(status)
 }
 
-// AdminNotifyTest sends a test notification.
+// AdminNotifyTest sends a test notification over the requested channel to the
+// calling admin, using the resolved (DB-over-env) config.
 func (h *Handler) AdminNotifyTest(w http.ResponseWriter, r *http.Request) {
+	sess := auth.SessionFromCtx(r.Context())
+	var body struct {
+		Channel string `json:"channel"` // "email" | "slack"
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+
 	w.Header().Set(contentTypeHeader, contentTypeJSON)
-	json.NewEncoder(w).Encode(map[string]any{
-		"status": "not_implemented",
-	})
+	switch body.Channel {
+	case "slack":
+		url := h.slackURL()
+		if url == "" {
+			json.NewEncoder(w).Encode(map[string]any{"status": "error", "error": "Slack is not configured or is disabled"})
+			return
+		}
+		if err := notify.PostContactInterest(url, "Test", sess.Email, "✅ Test message from the Facets admin integrations panel."); err != nil {
+			json.NewEncoder(w).Encode(map[string]any{"status": "error", "error": err.Error()})
+			return
+		}
+	case "email":
+		cfg := h.emailCfg()
+		if cfg.APIKey == "" {
+			json.NewEncoder(w).Encode(map[string]any{"status": "error", "error": "email is not configured or is disabled"})
+			return
+		}
+		if err := notify.SendContactInterest(cfg, []string{sess.Email}, "Test", sess.Email, "This is a test email from the Facets admin integrations panel."); err != nil {
+			json.NewEncoder(w).Encode(map[string]any{"status": "error", "error": err.Error()})
+			return
+		}
+	default:
+		json.NewEncoder(w).Encode(map[string]any{"status": "error", "error": "channel must be 'email' or 'slack'"})
+		return
+	}
+	_ = h.db.LogAdminAction(sess.Email, "notify_test", body.Channel, "")
+	json.NewEncoder(w).Encode(map[string]any{"status": "sent"})
+}
+
+// AdminGetIntegrations returns the masked notification configuration: secrets
+// as configured/last4 only, never in the clear. Also reports whether a server
+// encryption key is present (secrets cannot be saved without it).
+func (h *Handler) AdminGetIntegrations(w http.ResponseWriter, r *http.Request) {
+	settings, err := h.db.ListIntegrationSettings()
+	if err != nil {
+		http.Error(w, `{"error":"failed to read settings"}`, http.StatusInternalServerError)
+		return
+	}
+	get := func(key string) db.IntegrationSetting { return settings[key] }
+	resp := map[string]any{
+		"encryption_available": db.EncryptionAvailable(),
+		"email": map[string]any{
+			"enabled":      h.db.GetIntegrationValueOr(keyEmailEnabled, "true") != "false",
+			"from":         get(keyEmailFrom).Value,
+			"api_key":      map[string]any{"configured": get(keyEmailAPIKey).Configured, "last4": get(keyEmailAPIKey).Last4},
+			"env_fallback": h.notify.Email.APIKey != "",
+		},
+		"slack": map[string]any{
+			"enabled":      h.db.GetIntegrationValueOr(keySlackEnabled, "true") != "false",
+			"webhook_url":  map[string]any{"configured": get(keySlackWebhook).Configured, "last4": get(keySlackWebhook).Last4},
+			"env_fallback": h.notify.SlackURL != "",
+		},
+	}
+	w.Header().Set(contentTypeHeader, contentTypeJSON)
+	json.NewEncoder(w).Encode(resp)
+}
+
+// AdminPutIntegrations updates the notification configuration. Secret fields
+// left blank are preserved (not overwritten). Every change is audited; secret
+// values are never logged.
+func (h *Handler) AdminPutIntegrations(w http.ResponseWriter, r *http.Request) {
+	sess := auth.SessionFromCtx(r.Context())
+	var body struct {
+		Email *struct {
+			Enabled *bool   `json:"enabled"`
+			From    *string `json:"from"`
+			APIKey  *string `json:"api_key"` // blank = keep current
+		} `json:"email"`
+		Slack *struct {
+			Enabled    *bool   `json:"enabled"`
+			WebhookURL *string `json:"webhook_url"` // blank = keep current
+		} `json:"slack"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, `{"error":"invalid body"}`, http.StatusBadRequest)
+		return
+	}
+
+	set := func(key, val string, secret bool) error {
+		return h.db.SetIntegrationSetting(key, val, secret, sess.Email)
+	}
+	changed := []string{}
+
+	if body.Email != nil {
+		if body.Email.Enabled != nil {
+			if err := set(keyEmailEnabled, boolStr(*body.Email.Enabled), false); err != nil {
+				writeIntegrationErr(w, err)
+				return
+			}
+			changed = append(changed, "email.enabled")
+		}
+		if body.Email.From != nil {
+			if err := set(keyEmailFrom, *body.Email.From, false); err != nil {
+				writeIntegrationErr(w, err)
+				return
+			}
+			changed = append(changed, "email.from")
+		}
+		if body.Email.APIKey != nil && *body.Email.APIKey != "" {
+			if err := set(keyEmailAPIKey, *body.Email.APIKey, true); err != nil {
+				writeIntegrationErr(w, err)
+				return
+			}
+			changed = append(changed, "email.api_key")
+		}
+	}
+	if body.Slack != nil {
+		if body.Slack.Enabled != nil {
+			if err := set(keySlackEnabled, boolStr(*body.Slack.Enabled), false); err != nil {
+				writeIntegrationErr(w, err)
+				return
+			}
+			changed = append(changed, "slack.enabled")
+		}
+		if body.Slack.WebhookURL != nil && *body.Slack.WebhookURL != "" {
+			if err := set(keySlackWebhook, *body.Slack.WebhookURL, true); err != nil {
+				writeIntegrationErr(w, err)
+				return
+			}
+			changed = append(changed, "slack.webhook_url")
+		}
+	}
+
+	_ = h.db.LogAdminAction(sess.Email, "update_integrations", "", strings.Join(changed, ","))
+	h.AdminGetIntegrations(w, r)
+}
+
+func boolStr(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
+}
+
+func writeIntegrationErr(w http.ResponseWriter, err error) {
+	if err == db.ErrNoEncryptionKey {
+		w.Header().Set(contentTypeHeader, contentTypeJSON)
+		w.WriteHeader(http.StatusPreconditionFailed)
+		json.NewEncoder(w).Encode(map[string]string{"error": "SETTINGS_ENCRYPTION_KEY is not set on the server; secrets cannot be saved. Set it (base64 of 32 random bytes) and restart."})
+		return
+	}
+	http.Error(w, `{"error":"failed to save settings"}`, http.StatusInternalServerError)
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -1092,41 +1240,41 @@ func (h *Handler) AdminCompareRuns(w http.ResponseWriter, r *http.Request) {
 
 	resp := map[string]any{
 		"run_a": map[string]any{
-			"run_id":             runA.RunID,
-			"ts_utc":             runA.TsUTC,
-			"run_type":           runA.RunType,
-			"instruction":        runA.Instruction,
-			"aws_total":          runA.AWSTotal,
-			"gcp_od":             runA.GCPOD,
-			"gcp_1yr_cud":        runA.GCP1yrCUD,
-			"gcp_3yr_cud":        runA.GCP3yrCUD,
-			"mapped_rows":        runA.MappedRows,
-			"passthroughs":       runA.Passthroughs,
-			"confidence":         runA.Confidence,
+			"run_id":       runA.RunID,
+			"ts_utc":       runA.TsUTC,
+			"run_type":     runA.RunType,
+			"instruction":  runA.Instruction,
+			"aws_total":    runA.AWSTotal,
+			"gcp_od":       runA.GCPOD,
+			"gcp_1yr_cud":  runA.GCP1yrCUD,
+			"gcp_3yr_cud":  runA.GCP3yrCUD,
+			"mapped_rows":  runA.MappedRows,
+			"passthroughs": runA.Passthroughs,
+			"confidence":   runA.Confidence,
 		},
 		"run_b": map[string]any{
-			"run_id":             runB.RunID,
-			"ts_utc":             runB.TsUTC,
-			"run_type":           runB.RunType,
-			"instruction":        runB.Instruction,
-			"aws_total":          runB.AWSTotal,
-			"gcp_od":             runB.GCPOD,
-			"gcp_1yr_cud":        runB.GCP1yrCUD,
-			"gcp_3yr_cud":        runB.GCP3yrCUD,
-			"mapped_rows":        runB.MappedRows,
-			"passthroughs":       runB.Passthroughs,
-			"confidence":         runB.Confidence,
+			"run_id":       runB.RunID,
+			"ts_utc":       runB.TsUTC,
+			"run_type":     runB.RunType,
+			"instruction":  runB.Instruction,
+			"aws_total":    runB.AWSTotal,
+			"gcp_od":       runB.GCPOD,
+			"gcp_1yr_cud":  runB.GCP1yrCUD,
+			"gcp_3yr_cud":  runB.GCP3yrCUD,
+			"mapped_rows":  runB.MappedRows,
+			"passthroughs": runB.Passthroughs,
+			"confidence":   runB.Confidence,
 		},
-		"aws_delta":             awsDelta,
-		"gcp_od_delta":          gcpODDelta,
-		"gcp_1yr_cud_delta":     gcp1yrDelta,
-		"gcp_3yr_cud_delta":     gcp3yrDelta,
-		"assumptions_version_a": assumptionsVersionA,
-		"assumptions_version_b": assumptionsVersionB,
+		"aws_delta":                 awsDelta,
+		"gcp_od_delta":              gcpODDelta,
+		"gcp_1yr_cud_delta":         gcp1yrDelta,
+		"gcp_3yr_cud_delta":         gcp3yrDelta,
+		"assumptions_version_a":     assumptionsVersionA,
+		"assumptions_version_b":     assumptionsVersionB,
 		"report_settings_version_a": reportSettingsVersionA,
 		"report_settings_version_b": reportSettingsVersionB,
-		"catalog_vintage_a":       catalogVintageA,
-		"catalog_vintage_b":       catalogVintageB,
+		"catalog_vintage_a":         catalogVintageA,
+		"catalog_vintage_b":         catalogVintageB,
 	}
 	w.Header().Set(contentTypeHeader, contentTypeJSON)
 	json.NewEncoder(w).Encode(resp)
@@ -1362,10 +1510,18 @@ func (h *Handler) AdminUpdateTicket(w http.ResponseWriter, r *http.Request) {
 		description := body.Description
 		priority := body.Priority
 		category := body.Category
-		if title == "" { title = ticket.Title }
-		if description == "" { description = ticket.Description }
-		if priority == "" { priority = ticket.Priority }
-		if category == "" { category = ticket.Category }
+		if title == "" {
+			title = ticket.Title
+		}
+		if description == "" {
+			description = ticket.Description
+		}
+		if priority == "" {
+			priority = ticket.Priority
+		}
+		if category == "" {
+			category = ticket.Category
+		}
 		if err := h.db.UpdateTicket(id, title, description, priority, category); err != nil {
 			http.Error(w, `{"error":"failed to update ticket"}`, http.StatusInternalServerError)
 			return
@@ -1383,7 +1539,7 @@ func (h *Handler) AdminUpdateTicket(w http.ResponseWriter, r *http.Request) {
 // NotificationItem represents a single unified event in the admin notification feed.
 type NotificationItem struct {
 	ID        string `json:"id"`
-	Type      string `json:"type"`      // "job_failed", "job_completed", "ticket_raised", "assumption_changed", "setting_changed"
+	Type      string `json:"type"` // "job_failed", "job_completed", "ticket_raised", "assumption_changed", "setting_changed"
 	Title     string `json:"title"`
 	Message   string `json:"message"`
 	Severity  string `json:"severity"`  // "critical", "warning", "info", "success"
@@ -1752,13 +1908,13 @@ func (h *Handler) AdminPreviewUploadedBill(w http.ResponseWriter, r *http.Reques
 
 	w.Header().Set(contentTypeHeader, contentTypeJSON)
 	json.NewEncoder(w).Encode(map[string]any{
-		"file_name":    bill.FileName,
-		"content_hash": bill.ContentHash,
-		"input_ext":    bill.InputExt,
-		"file_size":    bill.FileSize,
-		"lines":        lines,
+		"file_name":        bill.FileName,
+		"content_hash":     bill.ContentHash,
+		"input_ext":        bill.InputExt,
+		"file_size":        bill.FileSize,
+		"lines":            lines,
 		"total_lines_read": len(lines),
-		"is_truncated": count >= 100,
+		"is_truncated":     count >= 100,
 	})
 }
 
@@ -1820,13 +1976,13 @@ func (h *Handler) AdminActionFinding(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Action      string  `json:"action"` // accept | reject | defer
-		Note        string  `json:"note"`
-		GCPService  string  `json:"gcp_service,omitempty"`
-		GCPSKUName  string  `json:"gcp_sku_name,omitempty"`
-		GCPSKUID    string  `json:"gcp_sku_id,omitempty"`
-		Strategy    string  `json:"strategy,omitempty"`
-		Multiplier  float64 `json:"unit_multiplier,omitempty"`
+		Action     string  `json:"action"` // accept | reject | defer
+		Note       string  `json:"note"`
+		GCPService string  `json:"gcp_service,omitempty"`
+		GCPSKUName string  `json:"gcp_sku_name,omitempty"`
+		GCPSKUID   string  `json:"gcp_sku_id,omitempty"`
+		Strategy   string  `json:"strategy,omitempty"`
+		Multiplier float64 `json:"unit_multiplier,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -1979,5 +2135,3 @@ func (h *Handler) promoteFindingToRefreshStore(key, gcpService, gcpSKUName, gcpS
 		_ = os.WriteFile(storePath, out, 0644)
 	}
 }
-
-

@@ -53,6 +53,10 @@ type NotifyConfig struct {
 	SlackURL string
 }
 
+// (notification config is resolved at send time via emailCfg()/slackURL() in
+// notify_resolve.go so admin changes in the integration_settings table take
+// effect without a server restart.)
+
 type Handler struct {
 	db          *db.DB
 	jobsDir     string
@@ -303,7 +307,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	slog.Info("job submitted", "job_id", jobID, "prospect", prospect, "user", sess.Email, "ext", ext, "sha256", hashHex, "engine", engineChoice)
 
 	go func() {
-		if err := notify.PostJobSubmitted(h.notify.SlackURL, prospect, sess.Email, jobID); err != nil {
+		if err := notify.PostJobSubmitted(h.slackURL(), prospect, sess.Email, jobID); err != nil {
 			slog.Warn("PostJobSubmitted failed", "job_id", jobID, "err", err)
 		}
 	}()
@@ -434,7 +438,7 @@ func (h *Handler) CreateFromExistingBill(w http.ResponseWriter, r *http.Request)
 	slog.Info("job created from cached bill", "job_id", jobID, "prospect", prospect, "user", sess.Email, "sha256", hash, "engine", engineChoice)
 
 	go func() {
-		if err := notify.PostJobSubmitted(h.notify.SlackURL, prospect, sess.Email, jobID); err != nil {
+		if err := notify.PostJobSubmitted(h.slackURL(), prospect, sess.Email, jobID); err != nil {
 			slog.Warn("PostJobSubmitted failed", "job_id", jobID, "err", err)
 		}
 	}()
@@ -625,7 +629,7 @@ func (h *Handler) CompleteChunkedUpload(w http.ResponseWriter, r *http.Request) 
 	slog.Info("chunked job submitted", "job_id", jobID, "prospect", prospect, "user", sess.Email, "ext", ext, "chunks", req.TotalChunks, "engine", engineChoice)
 
 	go func() {
-		if err := notify.PostJobSubmitted(h.notify.SlackURL, prospect, sess.Email, jobID); err != nil {
+		if err := notify.PostJobSubmitted(h.slackURL(), prospect, sess.Email, jobID); err != nil {
 			slog.Warn("PostJobSubmitted failed", "job_id", jobID, "err", err)
 		}
 	}()
@@ -642,12 +646,12 @@ func (h *Handler) runJob(jobID, jobDir, ext string, sess *auth.Session, engine .
 	if err != nil {
 		h.db.UpdateJobFailed(jobID, "spawn failed: "+err.Error())
 		go func() {
-			if err := notify.SendJobFailed(h.notify.Email, sess.Email, sess.Name, ""); err != nil {
+			if err := notify.SendJobFailed(h.emailCfg(), sess.Email, sess.Name, ""); err != nil {
 				slog.Warn("SendJobFailed failed", "job_id", jobID, "err", err)
 			}
 		}()
 		go func() {
-			if err := notify.PostJobFailed(h.notify.SlackURL, "", sess.Email, jobID); err != nil {
+			if err := notify.PostJobFailed(h.slackURL(), "", sess.Email, jobID); err != nil {
 				slog.Warn("PostJobFailed failed", "job_id", jobID, "err", err)
 			}
 		}()

@@ -216,7 +216,16 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     FOREIGN KEY (user_email) REFERENCES users(email)
 );
 
-CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_email);`
+CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_email);
+
+CREATE TABLE IF NOT EXISTS integration_settings (
+    key         TEXT PRIMARY KEY,
+    value       TEXT,
+    secret_enc  BLOB,
+    is_secret   INTEGER NOT NULL DEFAULT 0,
+    updated_by  TEXT NOT NULL DEFAULT '',
+    updated_at  DATETIME NOT NULL DEFAULT (datetime('now'))
+);`
 
 // Open opens a database connection. If remoteURL is provided and non-empty (e.g. Turso libsql://),
 // it connects to the cloud libSQL database. Otherwise, it opens the local SQLite file at path.

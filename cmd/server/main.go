@@ -22,6 +22,7 @@ import (
 	"github.com/facets/cur-web/internal/db"
 	"github.com/facets/cur-web/internal/jobs"
 	"github.com/facets/cur-web/internal/logger"
+	"github.com/facets/cur-web/internal/mcp"
 	"github.com/facets/cur-web/internal/notify"
 	"github.com/facets/cur-web/internal/preflight"
 	"github.com/facets/cur-web/internal/skill"
@@ -238,6 +239,12 @@ func main() {
 	// Vary: Cookie, Authorization is what prevents one user's token
 	// response from being served to another (the reported symptom).
 		r.Use(auth.APICacheControl)
+		// Bearer-token auth runs before the cookie middleware: a valid
+		// "Authorization: Bearer fct_live_..." populates the same *Session a
+		// cookie login would, so every downstream handler (and the MCP server)
+		// is scoped to that user by construction. No header = pass through to
+		// the cookie path untouched.
+		r.Use(auth.TokenMiddleware(database.LookupAPIToken, database.TouchAPITokenLastUsedAsync))
 		// Resolve role per-request from the users table so role changes
 		// (admin demotion/promotion) take effect on the next request without
 		// requiring re-login (WORKORDER §1.1).
@@ -274,6 +281,33 @@ func main() {
 		r.Get("/api/user/tokens", jobHandler.ListUserAPITokens)
 		r.Post("/api/user/tokens", tokenCreateLimiter(jobHandler.CreateUserAPIToken))
 		r.Delete("/api/user/tokens/{key_id}", jobHandler.RevokeUserAPIToken)
+
+		// MCP (Model Context Protocol) server — Streamable HTTP transport.
+		// Remote clients (Claude Desktop, Praxis) connect to ${APP_BASE_URL}/mcp
+		// with the same fct_live_ bearer token. Each tool is a thin adapter over
+		// an existing scoped REST handler, so per-user access is enforced once by
+		// the handler, not duplicated here. Gated by MCP_ENABLED (default on);
+		// individual tools toggle via MCP_TOOL_<NAME>_ENABLED.
+		if mcp.Enabled() {
+			mcpReg := mcp.DefaultRegistry(mcp.Handlers{
+				ListJobs: jobHandler.List,
+				GetJob:   jobHandler.GetByID,
+				JobLogs:  jobHandler.JobLogs,
+			})
+			mcpHandler := mcp.Handler(mcpReg)
+			r.Post("/mcp", mcpHandler)
+			r.Get("/mcp", mcpHandler)
+			// Discovery: lets a client self-configure from the base URL alone.
+			r.Get("/.well-known/mcp", func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"endpoint":        "/mcp",
+					"transport":       "streamable-http",
+					"protocolVersion": mcp.ProtocolVersion,
+					"auth":            "bearer",
+				})
+			})
+		}
 
 		// Token-authenticated API calls are rate limited per key id (600/min)
 		// so one runaway script can't lock a user out of their other
@@ -314,6 +348,10 @@ func main() {
 			r.Get("/api/admin/jobs/{id}/compare", jobHandler.AdminCompareRuns)
 			r.Get("/api/admin/notify/status", jobHandler.AdminNotifyStatus)
 			r.Post("/api/admin/notify/test", jobHandler.AdminNotifyTest)
+			// In-app notification configuration (email + Slack), stored
+			// encrypted in integration_settings; resolved over env at send time.
+			r.Get("/api/admin/integrations", jobHandler.AdminGetIntegrations)
+			r.Put("/api/admin/integrations", jobHandler.AdminPutIntegrations)
 			// Ticket management
 			r.Post("/api/admin/tickets", jobHandler.AdminCreateTicket)
 			r.Get("/api/admin/tickets", jobHandler.AdminListTickets)

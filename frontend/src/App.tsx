@@ -10,6 +10,7 @@ import { AdminReportSettings } from './pages/AdminReportSettings'
 import { AdminAudit } from './pages/AdminAudit'
 import { AdminAnalytics } from './pages/AdminAnalytics'
 import { AdminNotifications } from './pages/AdminNotifications'
+import { AdminIntegrations } from './pages/AdminIntegrations'
 import { SharedReport } from './pages/SharedReport'
 import { Tickets } from './pages/Tickets'
 import { Profile } from './pages/Profile'
@@ -62,6 +63,7 @@ export default function App() {
           <Route path="/admin/catalog" element={user && isAdmin ? <AdminCatalog user={user} /> : <Navigate to="/" />} />
           <Route path="/admin/assumptions" element={user && isAdmin ? <AdminAssumptions user={user} /> : <Navigate to="/" />} />
           <Route path="/admin/report-settings" element={user && isAdmin ? <AdminReportSettings user={user} /> : <Navigate to="/" />} />
+          <Route path="/admin/integrations" element={user && isAdmin ? <AdminIntegrations user={user} /> : <Navigate to="/" />} />
           <Route path="/admin/audit" element={user && isAdmin ? <AdminAudit user={user} /> : <Navigate to="/" />} />
           <Route path="/admin/analytics" element={user && isAdmin ? <AdminAnalytics user={user} /> : <Navigate to="/" />} />
           <Route path="/admin/notifications" element={user && isAdmin ? <AdminNotifications user={user} /> : <Navigate to="/" />} />

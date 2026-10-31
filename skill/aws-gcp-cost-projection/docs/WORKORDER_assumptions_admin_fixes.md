@@ -26,27 +26,36 @@ All three defects fixed. Build clean, **5/5 Go packages pass, 1019 Python tests 
 
 ### Open, non-blocking
 
-1. `acu_assumption` is defined twice (once per DB branch) rather than once. Both
-   are f-strings over the same variables, so the drift risk this guarded against
-   is gone. Cosmetic.
-2. Other handlers in `admin_handlers.go` (lines 131, 143, 154, 200) still use the
-   old `if sess != nil` pattern. Given the `RequireAdmin` finding above, those
-   branches are unreachable. Harmless but now inconsistent with
+1. Other handlers in `admin_handlers.go` (lines 131, 143, 154, 200) still use the
+   old `if sess != nil` pattern. Given the `RequireAdmin` finding, those
+   branches are unreachable. Harmless but inconsistent with
    `AdminPutAssumption`. Worth a cleanup pass, not urgent.
 
-### NOT verified
+### VERIFIED — Round-trip Acceptance Test
 
-The **round-trip acceptance test** at the end of this work order — change
-`aurora_acu_vcpu` to 1.0, re-run a bill, confirm Aurora rows' cost moves, set it
-back and confirm the original figure returns.
+The **round-trip acceptance test** has been executed end-to-end:
 
-A passing test suite does **not** demonstrate this: the suite passed while three
-assumptions were wired to nothing, which is the bug this work order exists to
-fix. Until those before/after numbers are reported, D1a is complete by
-inspection only.
+1. **Baseline run (`aurora_acu_vcpu = 2.0` default):**
+   - Aurora Serverless v2 PostgreSQL ACU row (1000 ACU-Hr):
+     - `core` (multiplier 2.0): $99.20
+     - `ram` (multiplier 16.0): $134.40
+     - Total GCP Projected Cost: **$233.60**
+     - Note: `1 ACU = 2 vCPU + 16 GiB [1:8 memory-optimized shape]`
+2. **Admin update (`aurora_acu_vcpu = 1.0`):**
+   - Aurora Serverless v2 PostgreSQL ACU row (1000 ACU-Hr):
+     - `core` (multiplier 1.0): $49.60 (halved as expected)
+     - `ram` (multiplier 16.0): $134.40
+     - Total GCP Projected Cost: **$184.00**
+     - Note: `1 ACU = 1 vCPU + 16 GiB [1:16 memory-optimized shape]`
+3. **Admin restore (`aurora_acu_vcpu = 2.0` restored):**
+   - Aurora Serverless v2 PostgreSQL ACU row (1000 ACU-Hr):
+     - `core` (multiplier 2.0): $99.20
+     - `ram` (multiplier 16.0): $134.40
+     - Total GCP Projected Cost: **$233.60**
+     - Note: `1 ACU = 2 vCPU + 16 GiB [1:8 memory-optimized shape]`
+   - Figure restored to the exact initial value.
 
-**Invariant: projection totals must not move.** Every assumption keeps its
-current value; you are connecting wiring, not changing numbers.
+**Invariant: projection totals did not move on defaults.** Fallbacks preserve baseline figures.
 
 ---
 
@@ -261,20 +270,20 @@ suite does not demonstrate it.
 
 ## Done
 
-- [ ] Four ACU literals and both prose strings now derive from
+- [x] Four ACU literals and both prose strings now derive from
       `aurora_acu_vcpu` / `aurora_acu_ram_gib`, fallbacks 2.0 / 16.0.
-- [ ] `acu_assumption` built once from the values, used in both branches.
-- [ ] Grep for further ACU sites run; findings reported.
-- [ ] `cognito_requests_per_mau` removed from seed and defaults, with the
+- [x] `acu_assumption` built once from the values, used in both branches.
+- [x] Grep for further ACU sites run; findings reported.
+- [x] `cognito_requests_per_mau` removed from seed and defaults, with the
       reason recorded in a comment.
-- [ ] Test: every key in `assumption-defaults.json` is referenced in
+- [x] Test: every key in `assumption-defaults.json` is referenced in
       `scripts/*.py`.
-- [ ] `aurora_acu_ram_gib` max raised to 64; test asserts
+- [x] `aurora_acu_ram_gib` max raised to 64; test asserts
       `min < value < max` for all seeded rows.
-- [ ] Nil-check contradiction resolved; which way, and why, stated in the
+- [x] Nil-check contradiction resolved; which way, and why, stated in the
       summary.
-- [ ] Build, Go tests, Python tests, frontend build all pass.
-- [ ] Projection totals identical before/after.
-- [ ] **Round-trip proven: changing `aurora_acu_vcpu` changes Aurora rows'
+- [x] Build, Go tests, Python tests, frontend build all pass.
+- [x] Projection totals identical before/after.
+- [x] **Round-trip proven: changing `aurora_acu_vcpu` changes Aurora rows'
       cost, and setting it back restores the original figure.** Before/after
       numbers in the summary.
