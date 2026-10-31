@@ -377,13 +377,34 @@ select:focus {
   0%, 100% { background-position: 0% 50%; }
   50%      { background-position: 100% 50%; }
 }
+/* The headline balances its two lines instead of leaving a long first line
+   and a short orphan, which is what split "SKU-level" across the break. */
+.login-headline {
+  text-wrap: balance;
+}
 .login-gradient-text {
+  /* inline-block, not inline: an inline box is fragmented per line, so each
+     line got its own slice of a 200%-wide gradient and rendered as a
+     different flat colour instead of one purple-to-teal sweep. */
+  display: inline-block;
   background: linear-gradient(90deg, #645DF6, #00C2BB, #645DF6);
   background-size: 200% auto;
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+  /* Safari paints `color` over a text-clipped background without this. */
+  -webkit-text-fill-color: transparent;
+  /* background-clip: text crops at the text box, which cuts descenders
+     (the "p" in "precision"). */
+  padding-bottom: 0.12em;
   animation: gradient-shimmer 6s ease-in-out infinite;
+}
+/* Fallback: with no background-clip support the text would be invisible. */
+@supports not ((-webkit-background-clip: text) or (background-clip: text)) {
+  .login-gradient-text {
+    color: #00C2BB;
+    -webkit-text-fill-color: #00C2BB;
+  }
 }
 @keyframes rise-fade {
   from { opacity: 0; transform: translateY(14px); }

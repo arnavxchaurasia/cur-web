@@ -265,7 +265,7 @@ export function Login() {
 
         <div className="max-w-md relative z-10 text-center anim-fade-in-up delay-175">
           <p className="login-eyebrow text-xs uppercase tracking-[0.3em] text-[#00C2BB] mb-3">Intelligent Cloud Migration</p>
-          <h2 className="text-3xl font-semibold leading-tight tracking-tight">
+          <h2 className="login-headline text-3xl font-semibold leading-tight tracking-tight">
             Estimate cloud costs <span className="login-gradient-text">with SKU-level precision</span>
           </h2>
           <p className="text-gray-400 text-sm mt-3 leading-relaxed">
