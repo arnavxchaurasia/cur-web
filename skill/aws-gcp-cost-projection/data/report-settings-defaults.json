@@ -11,8 +11,8 @@
     "col_region": "false",
     "section_discounts": "true",
     "section_wins_losses": "true",
-    "section_assumptions": "false",
-    "section_data_gaps": "false",
+    "section_assumptions": "true",
+    "section_data_gaps": "true",
     "row_min_cost_usd": "0",
     "col_pct_of_aws": "true",
     "section_coverage": "true"

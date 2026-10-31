@@ -60,8 +60,8 @@ def test_load_report_settings_returns_defaults_when_file_absent():
     assert result["col_region"] == "false"
     assert result["section_discounts"] == "true"
     assert result["section_wins_losses"] == "true"
-    assert result["section_assumptions"] == "false"
-    assert result["section_data_gaps"] == "false"
+    assert result["section_assumptions"] == "true"
+    assert result["section_data_gaps"] == "true"
     assert result["row_min_cost_usd"] == "0"
 
 

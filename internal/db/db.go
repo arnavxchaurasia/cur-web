@@ -343,6 +343,20 @@ func Open(path string, remoteURL ...string) (*DB, error) {
 		}
 	}
 
+	// Enable assumption and data-gaps sections in pre-existing report_settings rows
+	var assumptionSectionsApplied int
+	if err := conn.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE name = 'enable_assumption_sections_2026_10'`).Scan(&assumptionSectionsApplied); err == nil && assumptionSectionsApplied == 0 {
+		tx, err := conn.Begin()
+		if err == nil {
+			_, _ = tx.Exec(`
+				UPDATE report_settings SET value = 'true', default_value = 'true'
+				WHERE key IN ('section_assumptions', 'section_data_gaps');
+				INSERT INTO schema_migrations (name, applied_at) VALUES ('enable_assumption_sections_2026_10', datetime('now'));
+			`)
+			_ = tx.Commit()
+		}
+	}
+
 	// Seed assumptions table with today's values (INSERT OR IGNORE — never
 	// overwrite an admin's edit on restart).
 	if _, err := conn.Exec(`
@@ -376,8 +390,8 @@ func Open(path string, remoteURL ...string) (*DB, error) {
 			-- group 'sections' (bool)
 			('section_discounts', 'true', 'bool', 'true', NULL, NULL, 'Discounts and credits', 'AWS discounts applied to this bill', 'sections', 1),
 			('section_wins_losses', 'true', 'bool', 'true', NULL, NULL, 'Where GCP wins and loses', 'Per-service winners and losers', 'sections', 2),
-			('section_assumptions', 'false', 'bool', 'false', NULL, NULL, 'Assumptions used', 'The assumption values this run used', 'sections', 3),
-			('section_data_gaps', 'false', 'bool', 'false', NULL, NULL, 'Data gaps', 'Rows that could not be fully priced', 'sections', 4),
+			('section_assumptions', 'true', 'bool', 'true', NULL, NULL, 'Assumptions used', 'The assumption values this run used', 'sections', 3),
+			('section_data_gaps', 'true', 'bool', 'true', NULL, NULL, 'Data gaps', 'Rows that could not be fully priced', 'sections', 4),
 			('section_coverage', 'true', 'bool', 'true', NULL, NULL, 'Coverage statement', 'Customer-facing line stating what share of workload spend was priced against a specific GCP SKU', 'sections', 5),
 			-- group 'rows' (number)
 			('row_min_cost_usd', '0', 'number', '0', 0.0, 1000000.0, 'Hide rows below this cost', 'Rows cheaper than this are not listed. Totals still include them.', 'rows', 1),

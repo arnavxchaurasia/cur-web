@@ -44,6 +44,17 @@ func TestReportSettingsSeedInsertsMissingRows(t *testing.T) {
 	assert.Equal(t, 0.0, *s.MinValue)
 	assert.NotNil(t, s.MaxValue)
 	assert.Equal(t, 1000000.0, *s.MaxValue)
+
+	// Check section_assumptions = true and section_data_gaps = true
+	sAssump, ok := byKey["section_assumptions"]
+	require.True(t, ok)
+	assert.Equal(t, "true", sAssump.Value)
+	assert.Equal(t, "true", sAssump.DefaultValue)
+
+	sGaps, ok := byKey["section_data_gaps"]
+	require.True(t, ok)
+	assert.Equal(t, "true", sGaps.Value)
+	assert.Equal(t, "true", sGaps.DefaultValue)
 }
 
 func TestReportSettingsVersionHash(t *testing.T) {
